@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Splat Player — embed demo</title>
+    <style>
+      /* A stand-in for a content site: neutral paper/ink tokens that follow the OS theme,
+         a long scrolling page, and media sitting in the flow of the text. */
+      :root {
+        color-scheme: light dark;
+        --paper: light-dark(#ffffff, #000000);
+        --ink: light-dark(#141414, #ededeb);
+        --muted: light-dark(#696969, #8f8f8d);
+        --rule: light-dark(#dcdcdc, #2a2a2a);
+        --surface: light-dark(#f1f1f0, #111111);
+        --signal: light-dark(#007a55, #86f0c5);
+      }
+      :root[data-theme="light"] { color-scheme: light; }
+      :root[data-theme="dark"] { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 17px/1.55 "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+      }
+      .wrap { max-width: 72rem; margin: 0 auto; padding: 0 1.25rem; }
+      header.site { display: flex; align-items: center; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--rule); }
+      header.site .spacer { flex: 1; }
+      header.site button, .controls button {
+        font: inherit; font-size: 0.8125rem; padding: 0.3rem 0.7rem;
+        border: 1px solid var(--rule); background: none; color: inherit; cursor: pointer;
+      }
+      h1 { font-size: clamp(2.5rem, 1.4rem + 5vw, 5.5rem); line-height: 0.95; letter-spacing: -0.03em; margin: 4rem 0 1.5rem; }
+      h2 { font-size: 1.75rem; line-height: 1.1; margin: 0 0 1rem; }
+      section { padding: 2.5rem 0; border-top: 1px solid var(--rule); }
+      p { max-width: 42rem; }
+      .meta { color: var(--muted); font-size: 0.8125rem; }
+      code { font-size: 0.85em; background: var(--surface); padding: 0.1em 0.35em; }
+      figure { margin: 1.5rem 0; }
+      figcaption { margin-top: 0.5rem; }
+
+      /* the embed: the page only has to give it a box */
+      .stage { aspect-ratio: 16 / 9; background: var(--surface); }
+      .grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
+      .tile { aspect-ratio: 3 / 2; background: var(--surface); }
+      .tile.fake { display: grid; place-items: center; color: var(--muted); font-size: 0.8125rem; }
+      /* themed from the page: with a transparent canvas, --splat-bg tells the controls what
+         color they sit on, so their scrims and text stay legible in both themes */
+      .themed { --splat-bg: var(--surface); --splat-fg: var(--ink); --splat-accent: var(--signal); }
+      .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+      #log { font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; min-height: 3em; }
+      .tall { min-height: 60vh; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="site">
+        <strong>Embed demo</strong>
+        <span class="meta">how the player behaves inside a scrolling page</span>
+        <span class="spacer"></span>
+        <button type="button" id="theme">Toggle theme</button>
+        <a href="./">Open the editor</a>
+      </header>
+
+      <h1>A splat in the flow of a page</h1>
+      <p>
+        Scroll this page with the mouse over the viewer below: the page keeps scrolling. Drag to orbit. Click inside
+        first and the wheel zooms instead; move the pointer away and scrolling returns to the page.
+      </p>
+
+      <section>
+        <h2>1. Custom element, loads when it nears the viewport</h2>
+        <figure>
+          <splat-player class="stage" id="hero" scene="samples/knot.scene.json" poster="samples/knot.poster.webp" label="Torus knot, interactive 3D"></splat-player>
+          <figcaption class="meta">
+            <code>&lt;splat-player scene="…/knot.scene.json" poster="…"&gt;</code> — saved viewpoints appear at the lower left.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="tall">
+        <h2>Filler</h2>
+        <p>
+          This section only exists to put distance between the players, so the ones below are well outside the
+          viewport when the page opens. They should not download anything or create a WebGL context until you
+          scroll near them, and the one above should stop rendering once it is out of view.
+        </p>
+        <p id="log"></p>
+      </section>
+
+      <section>
+        <h2>2. A gallery tile that waits for a click</h2>
+        <p>For large captures: only the poster is fetched until the visitor asks for the 3D view.</p>
+        <div class="grid">
+          <div class="tile fake">photo</div>
+          <splat-player class="tile" id="tile" scene="samples/knot.scene.json" poster="samples/knot.poster.webp" load="click"></splat-player>
+          <div class="tile fake">photo</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>3. JavaScript API, transparent, themed by the page</h2>
+        <p>
+          Created with <code>new SplatPlayer(element, options)</code> and destroyed with <code>player.destroy()</code>,
+          the way a React effect would. The canvas is transparent, so the page's surface color shows through, and the
+          controls take the page's ink and accent colors.
+        </p>
+        <div class="stage themed" id="api"></div>
+        <div class="controls">
+          <button type="button" id="mount">Mount</button>
+          <button type="button" id="unmount">Unmount</button>
+          <button type="button" id="strict">Mount → unmount → mount (StrictMode)</button>
+          <span class="meta" id="api-state"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>4. Cut away and labelled</h2>
+        <p>
+          A section box hides part of the splat without deleting it, and labels are pinned to points on what is left.
+          The labels are plain text with no background, set in the page's own type. The two buttons at the lower right
+          switch the labels and the cut; a label whose point is cut away goes with it.
+        </p>
+        <figure>
+          <splat-player class="stage" id="infographic" scene="samples/knot.infographic.scene.json" poster="samples/knot.poster.webp"></splat-player>
+          <figcaption class="meta">The scene file carries a <code>sections</code> and an <code>annotations</code> list.</figcaption>
+        </figure>
+      </section>
+
+      <section>
+        <h2>5. Set flowing</h2>
+        <p>
+          A force field sets a share of the splats loose as small dots that travel, fade and start again from home, so
+          the form holds while a current runs through it. This one is a swirl with a little lift. The wave button stills
+          it; viewers who ask their system for reduced motion get it stilled to begin with.
+        </p>
+        <figure>
+          <splat-player class="stage" id="flow" scene="samples/knot.flow.scene.json" poster="samples/knot.poster.webp"></splat-player>
+          <figcaption class="meta">The scene file carries a <code>forces</code> list. Scenes with forces ask for WebGPU and fall back to WebGL 2.</figcaption>
+        </figure>
+      </section>
+
+      <section class="tall">
+        <h2>End</h2>
+        <p class="meta">Scroll back up: the first player resumes where you left it.</p>
+      </section>
+    </div>
+    <script type="module" src="/src/demo.ts"></script>
+  </body>
+</html>

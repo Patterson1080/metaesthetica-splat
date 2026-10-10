@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "Torus knot (procedural sample)",
+  "splats": [{ "src": "knot-clean.sog", "rotation": [0, 0, 180] }],
+  "camera": {
+    "fov": 50,
+    "initial": { "position": [2.6, 1.3, 3.4], "target": [0, 0, 0] }
+  },
+  "poses": [
+    { "name": "Front", "position": [0, 0.4, 4.2], "target": [0, 0, 0] },
+    { "name": "Above", "position": [0.4, 4.2, 1.2], "target": [0, 0, 0] },
+    { "name": "Through the loop", "position": [0.9, 0.15, 0.55], "target": [-0.6, 0.1, -0.4] }
+  ],
+  "controls": { "minDistance": 0.4, "maxDistance": 9, "minPitch": -89, "maxPitch": 12, "autoRotate": 6 },
+  "background": "#000000"
+}

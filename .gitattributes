@@ -1,0 +1,6 @@
+* text=auto eol=lf
+
+# splat data and images must never be line-ending converted
+*.ply binary
+*.sog binary
+*.webp binary

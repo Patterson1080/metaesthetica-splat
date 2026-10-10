@@ -1,0 +1,37 @@
+{
+  "name": "splat-engine",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Gaussian splat editor and embeddable player for the web, built on the PlayCanvas engine.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Patterson1080/metaesthetica-splat.git"
+  },
+  "type": "module",
+  "exports": {
+    "./player": {
+      "types": "./dist-lib/types/player/index.d.ts",
+      "import": "./dist-lib/splat-player.js"
+    }
+  },
+  "files": [
+    "dist-lib"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && vite build --config vite.lib.config.ts",
+    "build:app": "tsc --noEmit && vite build",
+    "build:lib": "vite build --config vite.lib.config.ts",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "sample": "node scripts/make-sample.mjs"
+  },
+  "dependencies": {
+    "playcanvas": "2.23.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

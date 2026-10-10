@@ -1,0 +1,313 @@
+:root {
+  color-scheme: dark;
+  --bg: #0c0c0d;
+  --panel: #161617;
+  --raised: #222224;
+  --hover: #2d2d30;
+  --line: #2a2a2d;
+  --text: #e9e9e6;
+  --muted: #8d8d8a;
+  --accent: #ffc81a;
+  --danger: #ff6b5e;
+  --radius: 5px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: grid;
+  grid-template:
+    "top top top" 44px
+    "rail view panel" minmax(0, 1fr)
+    "status status status" 28px
+    / 46px minmax(0, 1fr) 312px;
+  height: 100%;
+}
+
+[hidden] { display: none !important; }
+.spacer { flex: 1; }
+.sep { flex: none; background: var(--line); }
+.fine { color: var(--muted); font-size: 12px; margin: 0; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── controls ─────────────────────────────────────────────────────────── */
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--hover); }
+button:disabled { opacity: 0.4; cursor: default; }
+button svg { flex: none; }
+button .icon { display: inline-flex; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: #ffd54d; }
+button.danger:not(:disabled) { color: var(--danger); }
+
+input[type="number"], input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button { display: none; }
+input:disabled { opacity: 0.4; }
+input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+input[type="color"] { width: 36px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: none; }
+
+/* ── top bar ──────────────────────────────────────────────────────────── */
+
+.topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .brand { margin-right: 4px; letter-spacing: 0.01em; }
+.topbar .doc-name { margin-right: 8px; color: var(--muted); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .doc-name:empty { display: none; }
+.topbar .sep { width: 1px; height: 20px; margin: 0 4px; }
+.topbar button:has(> svg:only-child) { width: 30px; padding: 0; }
+
+/* ── tool rail ────────────────────────────────────────────────────────── */
+
+.rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.rail button { width: 32px; height: 32px; padding: 0; border-color: transparent; background: none; color: var(--muted); }
+.rail button:hover:not(:disabled) { color: var(--text); }
+.rail button[aria-pressed="true"] { background: var(--accent); color: #111; }
+.rail .sep { width: 22px; height: 1px; margin: 4px 0; }
+
+/* ── viewport ─────────────────────────────────────────────────────────── */
+
+.viewport {
+  grid-area: view;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+.viewport canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.viewport .scene { outline: none; touch-action: none; cursor: grab; }
+.viewport .scene:active { cursor: grabbing; }
+.viewport[data-tool="rect"] .scene, .viewport[data-tool="lasso"] .scene { cursor: crosshair; }
+.viewport[data-tool="brush"] .scene { cursor: none; }
+.viewport .overlay { pointer-events: none; }
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 460px);
+  padding: 40px 28px;
+  border: 1.5px dashed var(--line);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--muted);
+}
+.drop p { margin: 0; }
+.drop .lead { color: var(--text); font-size: 17px; font-weight: 600; }
+.drop .row { margin: 8px 0; }
+body.dropping .viewport::after {
+  content: "Drop to open";
+  position: absolute;
+  inset: 10px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: rgba(12, 12, 13, 0.82);
+  color: var(--accent);
+  font-size: 17px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.busy {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+/* ── side panel ───────────────────────────────────────────────────────── */
+
+.panel {
+  grid-area: panel;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  scrollbar-width: thin;
+  scrollbar-color: var(--hover) transparent;
+}
+.panel section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.panel h2 { margin: 0 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.panel h3 { margin: 6px 0 0; font-size: 12px; font-weight: 600; }
+body:not(.has-doc) .panel { opacity: 0.45; pointer-events: none; }
+
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+.row > button { flex: 1; }
+.column { display: flex; flex-direction: column; gap: 6px; }
+
+.field { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; }
+.field > span { color: var(--muted); }
+.field .controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.field output { flex: none; min-width: 4.2ch; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.field .controls > button { flex: none; }
+.check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 8px; margin: 0; }
+.stats dt { grid-row: 1; color: var(--muted); font-size: 11px; }
+.stats dd { grid-row: 2; margin: 0; font-size: 15px; font-variant-numeric: tabular-nums; }
+
+.poses { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.poses li { display: flex; gap: 4px; align-items: center; }
+.poses li button { flex: none; padding: 0 8px; }
+.poses li button:has(> svg:only-child) { width: 28px; padding: 0; }
+
+/* rows for the things that live in the scene: section boxes, forces, labels */
+.objects { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.objects:empty { display: none; }
+.objects li { display: flex; gap: 4px; align-items: center; }
+.objects li > input[type="text"] { flex: 1; }
+.objects li > button { flex: none; padding: 0 8px; }
+.objects li > button:has(> svg:only-child) { width: 28px; padding: 0; }
+.objects li > button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #111; }
+.objects li.active > input[type="text"] { border-color: var(--accent); }
+.detail { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+
+select, textarea {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+select { height: 26px; padding: 0 4px; }
+textarea { width: 100%; padding: 6px; resize: vertical; }
+
+.viewport .sa-layer { z-index: 1; }
+
+pre {
+  margin: 0;
+  padding: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  user-select: all;
+}
+
+/* ── status bar ───────────────────────────────────────────────────────── */
+
+.status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.status .message { overflow: hidden; text-overflow: ellipsis; }
+.status .message.error { color: var(--danger); }
+.status .counts { font-variant-numeric: tabular-nums; }
+
+/* ── preview dialog ───────────────────────────────────────────────────── */
+
+dialog.preview {
+  width: min(92vw, 1100px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  overflow: hidden;
+}
+dialog.preview::backdrop { background: rgba(0, 0, 0, 0.7); }
+dialog.preview header { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; }
+dialog.preview header button { width: 30px; padding: 0; }
+.preview-stage { aspect-ratio: 16 / 9; max-height: 76vh; width: 100%; background: #000; }
+
+.fatal { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; place-items: center; padding: 32px; text-align: center; color: var(--muted); }
+
+/* narrow windows: the panel becomes a strip under the viewport */
+@media (max-width: 820px) {
+  #app {
+    grid-template:
+      "top top" 44px
+      "rail view" minmax(0, 1fr)
+      "panel panel" 38%
+      "status status" 28px
+      / 46px minmax(0, 1fr);
+  }
+  .panel { border-left: none; border-top: 1px solid var(--line); }
+  .topbar .doc-name { display: none; }
+}

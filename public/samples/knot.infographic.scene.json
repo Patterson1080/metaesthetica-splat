@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "name": "Torus knot, cut away and labelled",
+  "splats": [{ "src": "knot-clean.sog", "rotation": [0, 0, 180] }],
+  "camera": {
+    "fov": 50,
+    "initial": { "position": [3.1, 1.5, 2.9], "target": [-0.2, 0, 0] }
+  },
+  "poses": [
+    { "name": "Into the cut", "position": [3.4, 0.5, 0.4], "target": [0, 0, 0] },
+    { "name": "From above", "position": [0.6, 4.4, 1.4], "target": [-0.2, 0, 0] }
+  ],
+  "controls": { "minDistance": 0.6, "maxDistance": 9, "minPitch": -89, "maxPitch": 12 },
+  "background": "#000000",
+  "sections": [
+    { "name": "Slice", "position": [-1.125, 0, 0], "rotation": [0, 0, 0], "size": [2.95, 3, 6], "mode": "keep" }
+  ],
+  "annotations": [
+    { "title": "Crest", "text": "Highest point of the loop,\n0.63 above the origin", "position": [-1, 0.63, 0], "offset": [-70, -52] },
+    { "title": "Crossing", "text": "The strand passes under itself here", "position": [-0.29, 0.21, 0.5], "offset": [64, -78] },
+    { "title": "Ground disc", "position": [-0.6, -0.86, 1.3], "offset": [-60, 36] },
+    { "title": "Outer rim", "text": "Hidden while the cut is on", "position": [1.62, 0, 0], "offset": [48, -40] }
+  ]
+}
