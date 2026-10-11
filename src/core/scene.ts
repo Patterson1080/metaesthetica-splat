@@ -71,9 +71,11 @@ export interface Annotation {
 export type ForceType = 'swirl' | 'wind' | 'attract' | 'turbulence'
 
 /**
- * A force field that sets splats flowing. A share of the splats within its reach leave
- * their place, travel along the force's motion as small dots, fade out and start again
- * from home, so the splat keeps its form while a current runs through it.
+ * A force field that sets the splat's own points flowing. Splats within its reach leave
+ * their place, travel along the force's motion, fade out and start again from home. No
+ * points are added: by default each carried splat keeps its shape and color. Optionally
+ * only a share is carried (the rest hold the form), and carried splats can be drawn as
+ * tinted dots.
  */
 export interface Force {
   name?: string
@@ -86,15 +88,15 @@ export interface Force {
   radius: number
   /** Speed of the motion: swirl in degrees/s, wind and turbulence in units/s, attract in 1/s (negative repels) */
   strength: number
-  /** Share (0..1) of the splats in reach that are set loose */
+  /** Share (0..1) of the splats in reach that are carried; default 1, all of them */
   amount?: number
   /** Seconds a loose splat travels before it fades and starts again from home */
   cycle?: number
-  /** Loose splats are drawn as round dots of this size in world units; 0 keeps their own shape */
+  /** Draw carried splats as round dots of this size in world units; default 0 keeps their own shape */
   dotSize?: number
-  /** Color the loose splats take on (hex) ... */
+  /** Color carried splats take on (hex) ... */
   color?: string
-  /** ... and how far it replaces their own color, 0..1 */
+  /** ... and how far it replaces their own color, 0..1; default 0 keeps their own color */
   tint?: number
   /** Wandering laid over the motion, in units/s */
   noise?: number
@@ -138,7 +140,8 @@ export const DEFAULT_ANNOTATION_OFFSET: [number, number] = [56, -44]
 /** Each force is a handful of uniforms and a few lines of shader evaluated for every splat */
 export const MAX_FORCES = 4
 export const FORCE_TYPES: readonly ForceType[] = ['swirl', 'wind', 'attract', 'turbulence']
-export const FORCE_DEFAULTS = { amount: 0.25, cycle: 6, dotSize: 0.012, color: '#7fd4ff', tint: 0.85, noise: 0.1, noiseScale: 1, lift: 0.1, pull: 0 }
+// by default a force carries the splat's own points, as they are: every splat in reach, in its own shape and color
+export const FORCE_DEFAULTS = { amount: 1, cycle: 6, dotSize: 0, color: '#7fd4ff', tint: 0, noise: 0.1, noiseScale: 1, lift: 0.1, pull: 0 }
 
 /** Captures are stored Y-down; a half-turn about Z stands them upright in a Y-up world. */
 export const DEFAULT_ROTATION: Vec3Tuple = [0, 0, 180]

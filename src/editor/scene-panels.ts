@@ -148,10 +148,10 @@ export function buildScenePanels(editor: Editor) {
   const params: { key: NumericKey; label: string; title: string; step: number; min?: number; max?: number; slider?: boolean; only?: ForceType }[] = [
     { key: 'radius', label: 'Reach', title: 'How far the force reaches, in world units. Its hold fades to nothing at this distance.', step: 0.1, min: 0.001 },
     { key: 'strength', label: 'Strength', title: 'Speed of the motion', step: 1 },
-    { key: 'amount', label: 'Share loose', title: 'Share of the splats in reach that are set flowing. The rest keep the form.', step: 0.01, min: 0, max: 1, slider: true },
-    { key: 'cycle', label: 'Travel time', title: 'Seconds a loose splat travels before it fades and starts again from home', step: 0.5, min: 0.1 },
-    { key: 'dotSize', label: 'Dot size', title: 'Loose splats are drawn as round dots this size, in world units. 0 keeps their own shape.', step: 0.002, min: 0 },
-    { key: 'tint', label: 'Tint', title: 'How far the color replaces each loose splat’s own color', step: 0.01, min: 0, max: 1, slider: true },
+    { key: 'amount', label: 'Share moving', title: 'Share of the splats in reach that the force carries. At 1 the whole splat in reach flows; lower values leave the rest in place to hold the form.', step: 0.01, min: 0, max: 1, slider: true },
+    { key: 'cycle', label: 'Travel time', title: 'Seconds a splat travels before it fades and starts again from home', step: 0.5, min: 0.1 },
+    { key: 'dotSize', label: 'Dot size', title: 'Optional look: draw the moving splats as round dots this size, in world units. 0 (default) keeps each splat’s own shape.', step: 0.002, min: 0 },
+    { key: 'tint', label: 'Tint', title: 'Optional look: how far the color below replaces each moving splat’s own color. 0 (default) keeps its own color.', step: 0.01, min: 0, max: 1, slider: true },
     { key: 'noise', label: 'Wander', title: 'Extra wandering laid over the motion, in world units per second', step: 0.01, min: 0 },
     { key: 'noiseScale', label: 'Eddy size', title: 'Size of the wander’s eddies, in world units', step: 0.1, min: 0.001 },
     { key: 'lift', label: 'Lift', title: 'Drift along the swirl’s axis, in world units per second', step: 0.01, only: 'swirl' },
@@ -172,7 +172,7 @@ export function buildScenePanels(editor: Editor) {
     const node = h('label', { class: 'field', title: param.title }, label, h('div', { class: 'controls' }, input, param.slider ? output : null))
     return { ...param, input, output, label, node }
   })
-  const color = h('input', { type: 'color', title: 'Color the loose splats take on' })
+  const color = h('input', { type: 'color', title: 'Tint color for moving splats (only shows when Tint is above 0)' })
   color.addEventListener('change', () => editForce({ color: color.value }))
   const forceDetail = h('div', { class: 'detail' }, forceVec.position.node, forceVec.rotation.node, ...paramRows.map((row) => row.node), field('Color', color))
 
@@ -184,7 +184,7 @@ export function buildScenePanels(editor: Editor) {
     forceDetail,
     h('div', { class: 'row' }, ...FORCE_TYPES.map((type) => button(`+ ${type[0].toUpperCase()}${type.slice(1)}`, () => editor.addForce(type)))),
     h('label', { class: 'check' }, preview, 'Run forces in the viewport'),
-    h('p', { class: 'fine' }, 'A force sets a share of the splats in its reach flowing as small dots; they travel, fade and start again from home. Press Edit to move it with tools 1 2 3 (scale changes its reach); its spine is the swirl axis or wind direction. Forces rest while a selection tool is in use. Dots that pass in front of the splat are only layered correctly on WebGPU, which the player picks by itself for scenes with forces.'),
+    h('p', { class: 'fine' }, 'A force moves the splat’s own points: those in its reach travel along it, fade and start again from home, keeping their shape and color. Nothing is added. Lower “Share moving” to leave part of the form in place; raise “Dot size” or “Tint” to restyle what moves. Press Edit to move the force with tools 1 2 3 (scale changes its reach); its spine is the swirl axis or wind direction. Forces rest while a selection tool is in use. Moving splats are only layered correctly on WebGPU, which the player picks by itself for scenes with forces.'),
   )
 
   // ── labels ───────────────────────────────────────────────────────────────

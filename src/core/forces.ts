@@ -30,7 +30,7 @@ function uniformsOf(force: Force): Float32Array[] {
     new Float32Array([force.position[0], force.position[1], force.position[2], Math.max(force.radius, 1e-4)]),
     // B: which way it points and how hard it drives
     new Float32Array([axis.x, axis.y, axis.z, force.strength]),
-    // C: share set loose, life cycles per second, dot radius, wander speed
+    // C: share carried, life cycles per second, dot radius (0 = own shape), wander speed
     new Float32Array([Math.min(Math.max(force.amount ?? d.amount, 0), 1), 1 / cycle, Math.max(force.dotSize ?? d.dotSize, 0) * 0.5, force.noise ?? d.noise]),
     // D: tint
     new Float32Array([r, g, b, Math.min(Math.max(force.tint ?? d.tint, 0), 1)]),
@@ -58,6 +58,8 @@ const motion: Record<ForceType, { glsl: string; wgsl: string }> = {
     // the core turns faster than the rim, which is what draws the arms of a vortex
     float angle = radians(strength) * age * (0.3 + 0.7 * reach);
     radial = radial * cos(angle) + cross(axis, radial) * sin(angle);
+    // the same turn as a quaternion, for the splat's own orientation
+    flowSpin = vec4(axis * sin(angle * 0.5), cos(angle * 0.5));
     radial *= max(r - E.y * age, 0.0) / r;
     p = radial + axis * (along + E.x * age);`,
     wgsl: `
@@ -66,6 +68,7 @@ const motion: Record<ForceType, { glsl: string; wgsl: string }> = {
     let r = max(length(radial), 0.00001);
     let angle = radians(strength) * age * (0.3 + 0.7 * reach);
     radial = radial * cos(angle) + cross(axis, radial) * sin(angle);
+    flowSpin = vec4f(axis * sin(angle * 0.5), cos(angle * 0.5));
     radial *= max(r - E.y * age, 0.0) / r;
     p = radial + axis * (along + E.x * age);`,
   },
@@ -99,8 +102,8 @@ const motion: Record<ForceType, { glsl: string; wgsl: string }> = {
 
 /**
  * Shader source declaring `applyForces(center)` for a given list of force types, plus the
- * values it leaves behind for the scale and color hooks: `flowLoose` (was this splat set
- * loose), `flowFade`, `flowDot` and `flowTint`.
+ * values it leaves behind for the scale and color hooks: `flowLoose` (is this splat being
+ * carried), `flowFade`, `flowSpin` (how a swirl has turned it), `flowDot` and `flowTint`.
  */
 export function forceChunk(types: readonly ForceType[]): { glsl: string; wgsl: string } {
   if (types.length === 0) {
@@ -110,6 +113,7 @@ float flowLoose = 0.0;
 float flowFade = 1.0;
 float flowDot = 0.0;
 vec4 flowTint = vec4(0.0);
+vec4 flowSpin = vec4(0.0, 0.0, 0.0, 1.0);
 void applyForces(inout vec3 center) {
 }
 `,
@@ -118,6 +122,7 @@ var<private> flowLoose: f32 = 0.0;
 var<private> flowFade: f32 = 1.0;
 var<private> flowDot: f32 = 0.0;
 var<private> flowTint: vec4f = vec4f(0.0);
+var<private> flowSpin: vec4f = vec4f(0.0, 0.0, 0.0, 1.0);
 fn applyForces(center: ptr<function, vec3f>) {
 }
 `,
@@ -134,6 +139,7 @@ float flowLoose = 0.0;
 float flowFade = 1.0;
 float flowDot = 0.0;
 vec4 flowTint = vec4(0.0);
+vec4 flowSpin = vec4(0.0, 0.0, 0.0, 1.0);
 
 // a different, effectively random number for every splat, from where it lives
 float flowHash(vec3 p, float seed) {
@@ -161,7 +167,7 @@ void flowForce${i}(vec3 home, inout vec3 offset) {
     // 1 at the center, fading to 0 at the edge of the force's reach
     float reach = 1.0 - smoothstep(0.0, A.w, length(rel));
     float pick = flowHash(home, ${(i * 1.7 + 0.3).toFixed(2)});
-    // fewer splats are set loose toward the edge, so the current thins out instead of ending
+    // fewer splats are carried toward the edge, so the current thins out instead of ending
     if (pick >= C.x * reach) return;
     // each splat keeps its own clock, so they leave home in a steady stream, not in waves
     float life = fract(uFlowTime * C.y + flowHash(home, ${(i * 2.3 + 5.1).toFixed(2)}));
@@ -197,6 +203,7 @@ var<private> flowLoose: f32 = 0.0;
 var<private> flowFade: f32 = 1.0;
 var<private> flowDot: f32 = 0.0;
 var<private> flowTint: vec4f = vec4f(0.0);
+var<private> flowSpin: vec4f = vec4f(0.0, 0.0, 0.0, 1.0);
 
 fn flowHash(p: vec3f, seed: f32) -> f32 {
     return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7)) + seed) * 43758.5453);

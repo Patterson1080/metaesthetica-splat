@@ -74,7 +74,7 @@ One thing to handle: the lightbox steps between items on the left and right arro
 
 - **Labels** are real text in the page's type with no background, so they read as part of the site's typography rather than as a 3D overlay. They are in the accessibility tree. Visitors can hide them; a label disappears with the geometry it points at when a section box cuts that away.
 - **Section boxes** and **forces** are part of the scene file, so a work page needs nothing extra to show a cut-away or a flowing version: it points at a different scene file for the same splat.
-- **Forces** animate continuously, so a player showing them keeps rendering while it is on screen (it still stops off-screen). They start stilled for visitors who ask for reduced motion. Scenes with forces ask for WebGPU, where moving splats are layered correctly, and fall back to WebGL 2, where the flow runs but dots passing in front of the form can be hidden behind it.
+- **Forces** animate continuously, so a player showing them keeps rendering while it is on screen (it still stops off-screen). They start stilled for visitors who ask for reduced motion. Scenes with forces ask for WebGPU, where moving splats are layered correctly, and fall back to WebGL 2, where the flow runs but splats carried in front of others can be drawn behind them.
 
 ## Assets
 

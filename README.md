@@ -33,7 +33,7 @@ npm run sample     # regenerate the procedural sample splats in public/samples/
 4. **Compose** (all optional, all stored in the scene file rather than baked into the splat):
    - **Section boxes** hide part of the splat. Shown is what lies inside any *keep* box, minus what lies inside any *cut* box.
    - **Labels** are text callouts pinned to points on the splat.
-   - **Forces** set a share of the splats flowing as small dots: swirl, wind, attract/repel, turbulence.
+   - **Forces** set the splat's own points flowing: swirl, wind, attract/repel, turbulence.
 5. **Stage.** Field of view, start view, saved viewpoints, zoom and pitch limits, auto-rotate, background. *Preview* runs the real player on the edited scene.
 6. **Export** the splat (`.ply`), the scene (`.scene.json`) and a poster (`.webp`).
 7. **Compress for the web** and point the scene at the result:
@@ -56,7 +56,7 @@ With the Label tool (`A`), click the splat to pin a label; drag its text to move
 
 ### Forces
 
-A force has a position, an orientation and a reach. A share of the splats within reach are set loose: they leave their place, travel along the force's motion as small round dots, fade out and start again from home. The form holds while a current runs through it.
+A force has a position, an orientation and a reach. It moves the splat's own points: the splats within reach leave their place, travel along the force's motion, fade out and start again from home. Nothing is added to the splat, and by default each moving splat keeps its own shape and color (a swirl also turns it, so streaks stay aligned with their orbit). Fewer splats are carried toward the edge of the reach, so the motion thins out rather than ending at a line.
 
 | Kind | Motion | Strength means |
 | --- | --- | --- |
@@ -65,11 +65,11 @@ A force has a position, an orientation and a reach. A share of the splats within
 | Attract | draws toward the center; negative repels | rate per second |
 | Turbulence | drifts through a tangle of steady currents | units per second |
 
-Every force also has: *share loose* (how many splats flow), *travel time*, *dot size* (0 keeps each splat's own shape), a color and how strongly it tints, and *wander* with an *eddy size* for organic irregularity. Press **Edit** to move a force with the gizmo; scaling changes its reach.
+Every force also has *travel time* and *wander* with an *eddy size* for organic irregularity, plus three ways to restyle the motion: *share moving* (below 1, the rest of the splats stay put and hold the form), *dot size* (above 0, moving splats are drawn as round dots) and *tint* (above 0, they take on a color). Press **Edit** to move a force with the gizmo; scaling changes its reach.
 
 The motion is computed in closed form on the GPU from a clock, with no per-splat simulation state, so it costs little and looks the same everywhere. Two consequences:
 
-- **Depth ordering needs WebGPU.** On WebGPU the engine sorts splats on the GPU from where they actually are. On WebGL 2 it sorts on the CPU from where they rest, so dots that pass in front of the form can be hidden behind it. The player therefore asks for WebGPU when a scene has forces and falls back to WebGL 2, where the flow still runs.
+- **Depth ordering needs WebGPU.** On WebGPU the engine sorts splats on the GPU from where they actually are. On WebGL 2 it sorts on the CPU from where they rest, so splats carried in front of others can be drawn behind them. The player therefore asks for WebGPU when a scene has forces and falls back to WebGL 2, where the flow still runs.
 - A scene with running forces renders every frame while on screen, instead of only when the camera moves.
 
 Forces rest in the editor while a selection tool is in use, because selection works on splats where they rest.
@@ -184,7 +184,7 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
   "forces": [
     {
       "name": "Updraft", "type": "swirl", "position": [0, 0, 0], "rotation": [0, 0, 0], "radius": 2.4, "strength": 55,
-      "amount": 0.3, "cycle": 7, "dotSize": 0.014, "color": "#7fd4ff", "tint": 0.9,
+      "amount": 1, "cycle": 7, "dotSize": 0, "tint": 0,
       "noise": 0.07, "noiseScale": 1.3, "lift": 0.14, "pull": 0
     }
   ]
