@@ -879,7 +879,9 @@ export class Editor {
       strength: type === 'swirl' ? 50 : type === 'attract' ? 0.25 : round(r * 0.1),
       amount: FORCE_DEFAULTS.amount,
       cycle: FORCE_DEFAULTS.cycle,
-      dotSize: FORCE_DEFAULTS.dotSize,
+      render: 'splats',
+      // ready for when the force is switched to points: sized to the splat like everything else
+      dotSize: round(r * 0.006, 4),
       color: FORCE_DEFAULTS.color,
       tint: FORCE_DEFAULTS.tint,
       noise: round(r * 0.03),

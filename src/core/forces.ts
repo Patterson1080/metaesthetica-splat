@@ -1,5 +1,5 @@
 import { Quat, Vec3, type GSplatComponent } from 'playcanvas'
-import { FORCE_DEFAULTS, MAX_FORCES, type Force, type ForceType } from './scene'
+import { FORCE_DEFAULTS, MAX_FORCES, drawsPoints, type Force, type ForceType } from './scene'
 
 /** The enabled forces, reduced to what the shader needs. */
 export interface ActiveForces {
@@ -25,13 +25,15 @@ function uniformsOf(force: Force): Float32Array[] {
   const [r, g, b] = hexToRgb(force.color ?? d.color)
   const cycle = Math.max(force.cycle ?? d.cycle, 0.1)
   const noiseScale = Math.max(force.noiseScale ?? d.noiseScale, 1e-3)
+  // a point's size is its diameter; the shader wants a gaussian radius
+  const pointRadius = drawsPoints(force) ? Math.max(force.dotSize || d.dotSize, 1e-4) * 0.5 : 0
   return [
     // A: where it is and how far it reaches
     new Float32Array([force.position[0], force.position[1], force.position[2], Math.max(force.radius, 1e-4)]),
     // B: which way it points and how hard it drives
     new Float32Array([axis.x, axis.y, axis.z, force.strength]),
-    // C: share carried, life cycles per second, dot radius (0 = own shape), wander speed
-    new Float32Array([Math.min(Math.max(force.amount ?? d.amount, 0), 1), 1 / cycle, Math.max(force.dotSize ?? d.dotSize, 0) * 0.5, force.noise ?? d.noise]),
+    // C: share carried, life cycles per second, point radius (0 = drawn as splats), wander speed
+    new Float32Array([Math.min(Math.max(force.amount ?? d.amount, 0), 1), 1 / cycle, pointRadius, force.noise ?? d.noise]),
     // D: tint
     new Float32Array([r, g, b, Math.min(Math.max(force.tint ?? d.tint, 0), 1)]),
     // E: swirl lift and pull, wander frequency

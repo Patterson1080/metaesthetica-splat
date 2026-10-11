@@ -65,7 +65,7 @@ A force has a position, an orientation and a reach. It moves the splat's own poi
 | Attract | draws toward the center; negative repels | rate per second |
 | Turbulence | drifts through a tangle of steady currents | units per second |
 
-Every force also has *travel time* and *wander* with an *eddy size* for organic irregularity, plus three ways to restyle the motion: *share moving* (below 1, the rest of the splats stay put and hold the form), *dot size* (above 0, moving splats are drawn as round dots) and *tint* (above 0, they take on a color). Press **Edit** to move a force with the gizmo; scaling changes its reach.
+Every force also has *travel time* and *wander* with an *eddy size* for organic irregularity, plus three choices about how the motion looks: *draw as* (**Splats**, each moving splat in its own shape, or **Points only**, plain round points of one *point size*), *share moving* (below 1, the rest of the splats stay put and hold the form) and *tint* (above 0, what moves takes on a color). Press **Edit** to move a force with the gizmo; scaling changes its reach.
 
 The motion is computed in closed form on the GPU from a clock, with no per-splat simulation state, so it costs little and looks the same everywhere. Two consequences:
 
@@ -184,7 +184,7 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
   "forces": [
     {
       "name": "Updraft", "type": "swirl", "position": [0, 0, 0], "rotation": [0, 0, 0], "radius": 2.4, "strength": 55,
-      "amount": 1, "cycle": 7, "dotSize": 0, "tint": 0,
+      "amount": 1, "cycle": 7, "render": "points", "dotSize": 0.014, "tint": 0,
       "noise": 0.07, "noiseScale": 1.3, "lift": 0.14, "pull": 0
     }
   ]

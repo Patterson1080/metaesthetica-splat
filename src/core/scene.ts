@@ -92,7 +92,12 @@ export interface Force {
   amount?: number
   /** Seconds a loose splat travels before it fades and starts again from home */
   cycle?: number
-  /** Draw carried splats as round dots of this size in world units; default 0 keeps their own shape */
+  /**
+   * How the splats this force carries are drawn: 'splats' (default) keeps each one's own
+   * shape, 'points' draws them as plain round points of one size.
+   */
+  render?: 'splats' | 'points'
+  /** Size of those points, in world units. Only used when `render` is 'points'. */
   dotSize?: number
   /** Color carried splats take on (hex) ... */
   color?: string
@@ -141,7 +146,10 @@ export const DEFAULT_ANNOTATION_OFFSET: [number, number] = [56, -44]
 export const MAX_FORCES = 4
 export const FORCE_TYPES: readonly ForceType[] = ['swirl', 'wind', 'attract', 'turbulence']
 // by default a force carries the splat's own points, as they are: every splat in reach, in its own shape and color
-export const FORCE_DEFAULTS = { amount: 1, cycle: 6, dotSize: 0, color: '#7fd4ff', tint: 0, noise: 0.1, noiseScale: 1, lift: 0.1, pull: 0 }
+export const FORCE_DEFAULTS = { amount: 1, cycle: 6, dotSize: 0.012, color: '#7fd4ff', tint: 0, noise: 0.1, noiseScale: 1, lift: 0.1, pull: 0 }
+
+/** Whether a force draws what it carries as points. Files from before `render` existed said so with a size above zero. */
+export const drawsPoints = (force: Force) => force.render === 'points' || (force.render === undefined && (force.dotSize ?? 0) > 0)
 
 /** Captures are stored Y-down; a half-turn about Z stands them upright in a Y-up world. */
 export const DEFAULT_ROTATION: Vec3Tuple = [0, 0, 180]
@@ -202,6 +210,7 @@ function parseForce(v: unknown): Force | null {
     strength,
     amount: num(f.amount),
     cycle: num(f.cycle),
+    render: drawsPoints(f) ? 'points' : 'splats',
     dotSize: num(f.dotSize),
     // only a plain hex color: scene files are untrusted input
     color: typeof f.color === 'string' && /^#[0-9a-f]{6}$/i.test(f.color) ? f.color : undefined,

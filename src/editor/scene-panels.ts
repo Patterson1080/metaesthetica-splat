@@ -1,4 +1,4 @@
-import { FORCE_DEFAULTS, FORCE_TYPES, type Force, type ForceType, type SectionBox, type Vec3Tuple } from '../core/scene'
+import { FORCE_DEFAULTS, FORCE_TYPES, drawsPoints, type Force, type ForceType, type SectionBox, type Vec3Tuple } from '../core/scene'
 import { button, field, h, icons, number, section, setValue, trim } from './dom'
 import type { ActiveObject, Editor } from './editor'
 
@@ -145,12 +145,12 @@ export function buildScenePanels(editor: Editor) {
   }
 
   type NumericKey = 'radius' | 'strength' | 'amount' | 'cycle' | 'dotSize' | 'tint' | 'noise' | 'noiseScale' | 'lift' | 'pull'
-  const params: { key: NumericKey; label: string; title: string; step: number; min?: number; max?: number; slider?: boolean; only?: ForceType }[] = [
+  const params: { key: NumericKey; label: string; title: string; step: number; min?: number; max?: number; slider?: boolean; only?: ForceType; when?: (force: Force) => boolean }[] = [
     { key: 'radius', label: 'Reach', title: 'How far the force reaches, in world units. Its hold fades to nothing at this distance.', step: 0.1, min: 0.001 },
     { key: 'strength', label: 'Strength', title: 'Speed of the motion', step: 1 },
     { key: 'amount', label: 'Share moving', title: 'Share of the splats in reach that the force carries. At 1 the whole splat in reach flows; lower values leave the rest in place to hold the form.', step: 0.01, min: 0, max: 1, slider: true },
     { key: 'cycle', label: 'Travel time', title: 'Seconds a splat travels before it fades and starts again from home', step: 0.5, min: 0.1 },
-    { key: 'dotSize', label: 'Dot size', title: 'Optional look: draw the moving splats as round dots this size, in world units. 0 (default) keeps each splat’s own shape.', step: 0.002, min: 0 },
+    { key: 'dotSize', label: 'Point size', title: 'Size of the points, in world units', step: 0.002, min: 0.0005, when: drawsPoints },
     { key: 'tint', label: 'Tint', title: 'Optional look: how far the color below replaces each moving splat’s own color. 0 (default) keeps its own color.', step: 0.01, min: 0, max: 1, slider: true },
     { key: 'noise', label: 'Wander', title: 'Extra wandering laid over the motion, in world units per second', step: 0.01, min: 0 },
     { key: 'noiseScale', label: 'Eddy size', title: 'Size of the wander’s eddies, in world units', step: 0.1, min: 0.001 },
@@ -174,7 +174,20 @@ export function buildScenePanels(editor: Editor) {
   })
   const color = h('input', { type: 'color', title: 'Tint color for moving splats (only shows when Tint is above 0)' })
   color.addEventListener('change', () => editForce({ color: color.value }))
-  const forceDetail = h('div', { class: 'detail' }, forceVec.position.node, forceVec.rotation.node, ...paramRows.map((row) => row.node), field('Color', color))
+  const drawAs = h('select', { title: 'How the splats this force carries are drawn' },
+    h('option', { value: 'splats' }, 'Splats (own shape)'),
+    h('option', { value: 'points' }, 'Points only'),
+  )
+  drawAs.addEventListener('change', () => editForce({ render: drawAs.value as Force['render'] }))
+  const drawRow = field('Draw as', drawAs)
+  drawRow.title = 'Splats: each moving splat keeps its own shape. Points: moving splats are drawn as plain round points of one size.'
+  // "Draw as" sits directly above the point size it governs
+  const forceDetail = h('div', { class: 'detail' },
+    forceVec.position.node,
+    forceVec.rotation.node,
+    ...paramRows.flatMap((row) => (row.key === 'dotSize' ? [drawRow, row.node] : [row.node])),
+    field('Color', color),
+  )
 
   const preview = h('input', { type: 'checkbox' })
   preview.addEventListener('change', () => editor.setFlowPreview(preview.checked))
@@ -184,7 +197,7 @@ export function buildScenePanels(editor: Editor) {
     forceDetail,
     h('div', { class: 'row' }, ...FORCE_TYPES.map((type) => button(`+ ${type[0].toUpperCase()}${type.slice(1)}`, () => editor.addForce(type)))),
     h('label', { class: 'check' }, preview, 'Run forces in the viewport'),
-    h('p', { class: 'fine' }, 'A force moves the splat’s own points: those in its reach travel along it, fade and start again from home, keeping their shape and color. Nothing is added. Lower “Share moving” to leave part of the form in place; raise “Dot size” or “Tint” to restyle what moves. Press Edit to move the force with tools 1 2 3 (scale changes its reach); its spine is the swirl axis or wind direction. Forces rest while a selection tool is in use. Moving splats are only layered correctly on WebGPU, which the player picks by itself for scenes with forces.'),
+    h('p', { class: 'fine' }, 'A force moves the splat’s own points: those in its reach travel along it, fade and start again from home, keeping their shape and color. Nothing is added. “Draw as” chooses whether what moves is drawn as splats or as plain points. Lower “Share moving” to leave part of the form in place; raise “Tint” to recolor what moves. Press Edit to move the force with tools 1 2 3 (scale changes its reach); its spine is the swirl axis or wind direction. Forces rest while a selection tool is in use. Moving splats are only layered correctly on WebGPU, which the player picks by itself for scenes with forces.'),
   )
 
   // ── labels ───────────────────────────────────────────────────────────────
@@ -248,7 +261,7 @@ export function buildScenePanels(editor: Editor) {
       forceVec.position.set(force.position)
       forceVec.rotation.set(force.rotation ?? [0, 0, 0])
       for (const row of paramRows) {
-        row.node.hidden = row.only !== undefined && row.only !== force.type
+        row.node.hidden = (row.only !== undefined && row.only !== force.type) || (row.when !== undefined && !row.when(force))
         const fallback = (FORCE_DEFAULTS as Record<string, number | string>)[row.key]
         const value = force[row.key] ?? (typeof fallback === 'number' ? fallback : 0)
         setValue(row.input, trim(value, 4))
@@ -256,6 +269,7 @@ export function buildScenePanels(editor: Editor) {
         if (row.key === 'strength') row.label.textContent = strengthUnits[force.type]
       }
       setValue(color, force.color ?? FORCE_DEFAULTS.color)
+      if (document.activeElement !== drawAs) drawAs.value = drawsPoints(force) ? 'points' : 'splats'
     }
     preview.checked = editor.flowPreview
 
