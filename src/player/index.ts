@@ -1,7 +1,8 @@
 import { AnnotationLayer } from '../core/annotations'
 import { Emitter } from '../core/events'
-import { fetchScene, parseScene, sceneFromSrc, DEFAULT_BACKGROUND, DEFAULT_FOV, type CameraPose, type DeviceType, type SplatScene } from '../core/scene'
+import { fetchScene, parseScene, restOpacity, sceneFromSrc, DEFAULT_BACKGROUND, DEFAULT_FOV, type CameraPose, type DeviceType, type SplatScene } from '../core/scene'
 import { SplatEffects } from '../core/effects'
+import { SectionFrameLayer } from '../core/section-frames'
 import { sectionTest } from '../core/sections'
 import { SplatViewer } from '../core/viewer'
 import { icons, playerCss } from './style'
@@ -131,6 +132,7 @@ export class SplatPlayer {
   private scene: SplatScene | null = null
   private effects: SplatEffects[] = []
   private callouts: AnnotationLayer | null = null
+  private frames: SectionFrameLayer | null = null
   private sectionsOn: boolean
   private annotationsOn: boolean
   private forcesOn: boolean
@@ -296,6 +298,8 @@ export class SplatPlayer {
     this.visibility?.disconnect()
     this.callouts?.destroy()
     this.callouts = null
+    this.frames?.destroy()
+    this.frames = null
     this.effects = []
     this.viewer?.destroy()
     this.viewer = null
@@ -382,6 +386,7 @@ export class SplatPlayer {
 
     this.effects = viewer.splats.map((splat) => new SplatEffects(splat.entity.gsplat!))
     this.callouts = new AnnotationLayer(this.shadow, viewer.camera, canvas, this.ui.center)
+    this.frames = new SectionFrameLayer(this.shadow, viewer.camera, canvas, this.callouts.root)
     this.applySceneLayers()
     viewer.events.on('update', (dt) => {
       // running forces move splats every frame, so the picture is never still
@@ -389,6 +394,7 @@ export class SplatPlayer {
       for (const effect of this.effects) moving = effect.advance(dt) || moving
       if (moving) viewer.requestRender()
       this.callouts?.update()
+      this.frames?.update()
     })
 
     await this.firstFrame(viewer)
@@ -435,17 +441,24 @@ export class SplatPlayer {
     const annotations = scene.annotations ?? []
     const forces = scene.forces ?? []
     const active = this.sectionsOn ? sections : []
+    const rest = restOpacity(scene.sectionRest)
+    const labelled = sections.filter((box) => box.label === true && box.enabled !== false)
     for (const effect of this.effects) {
-      effect.setSections(active)
+      effect.setSections(active, rest)
       effect.setForces(this.forcesOn ? forces : [])
     }
     if (this.callouts) {
-      // a callout whose point has been cut away goes with it
-      this.callouts.set(annotations, sectionTest(active))
+      // a callout whose point is no longer drawn goes with it; a faded point keeps its callout
+      this.callouts.set(annotations, rest > 0 ? null : sectionTest(active))
       this.callouts.visible = this.annotationsOn && annotations.length > 0
     }
+    if (this.frames) {
+      // a box's own label names the component it frames, so it follows the cut being on
+      this.frames.set(this.sectionsOn ? labelled : [])
+      this.frames.visible = this.annotationsOn && this.sectionsOn && labelled.length > 0
+    }
     this.syncToggle(this.ui.sections, sections.length > 0, this.sectionsOn, 'Show the whole', 'Show the cut-away')
-    this.syncToggle(this.ui.annotations, annotations.length > 0, this.annotationsOn, 'Hide labels', 'Show labels')
+    this.syncToggle(this.ui.annotations, annotations.length > 0 || labelled.length > 0, this.annotationsOn, 'Hide labels', 'Show labels')
     this.syncToggle(this.ui.forces, forces.length > 0, this.forcesOn, 'Still the flow', 'Set it flowing')
     this.viewer?.requestRender(3)
   }
@@ -461,6 +474,8 @@ export class SplatPlayer {
     if (this.destroyed) return
     this.callouts?.destroy()
     this.callouts = null
+    this.frames?.destroy()
+    this.frames = null
     this.effects = []
     this.viewer?.destroy()
     this.viewer = null
@@ -508,7 +523,7 @@ export class SplatPlayer {
       this.reset()
     } else if (key === 'f') {
       this.toggleFullscreen()
-    } else if (key === 'l' && this.scene?.annotations?.length) {
+    } else if (key === 'l' && (this.scene?.annotations?.length || this.scene?.sections?.some((box) => box.label))) {
       this.setAnnotationsVisible(!this.annotationsOn)
     } else if (key === 'c' && this.scene?.sections?.length) {
       this.setSectionsEnabled(!this.sectionsOn)

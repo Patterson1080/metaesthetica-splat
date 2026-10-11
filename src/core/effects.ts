@@ -25,6 +25,7 @@ export class SplatEffects {
   private forces: ActiveForces = activeForces([])
   private key: string | null = null
   private time = 0
+  private rest = 0
   private readonly ownBounds: BoundingBox | null
 
   constructor(
@@ -40,8 +41,10 @@ export class SplatEffects {
     return this.forces.types.length > 0
   }
 
-  setSections(sections: readonly SectionBox[]) {
+  /** `rest` is how visible the splats outside the boxes stay: 0 drops them, up to 1 leaves them as they are. */
+  setSections(sections: readonly SectionBox[], rest = 0) {
     this.sections = activeSections(sections)
+    this.rest = Math.min(Math.max(rest, 0), 1)
     this.apply()
   }
 
@@ -81,7 +84,7 @@ export class SplatEffects {
       if (!(idle && this.key === null)) component.setWorkBufferModifier(idle ? null : this.build())
       this.key = key
     }
-    setSectionUniforms(component, sections)
+    setSectionUniforms(component, sections, this.rest)
     setForceUniforms(component, forces)
     component.setParameter('uFlowTime', this.time)
     component.workBufferUpdate = this.animated ? WORKBUFFER_UPDATE_ALWAYS : WORKBUFFER_UPDATE_ONCE
@@ -105,7 +108,7 @@ void modifySplatCenter(inout vec3 center) {
 }
 
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
-    if (${edit ? 'loadSplatState().r * 255.0 > 1.5 || ' : ''}sectionCulled(modifiedCenter)) {
+    if (${edit ? 'loadSplatState().r * 255.0 > 1.5 || ' : ''}sectionKeep(modifiedCenter) <= 0.0) {
         scale = vec3(0.0);
         return;
     }
@@ -124,7 +127,8 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 
 void modifySplatColor(vec3 center, inout vec4 color) {
     ${edit ? 'float state = loadSplatState().r * 255.0;' : ''}
-    if (${edit ? 'state > 1.5 || ' : ''}sectionCulled(center)) {
+    float keep = sectionKeep(center);
+    if (${edit ? 'state > 1.5 || ' : ''}keep <= 0.0) {
         color.a = 0.0;
         return;
     }
@@ -138,6 +142,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // faint splats must stay visible while selected, or they cannot be judged before deleting
         color.a = max(color.a, 0.35);
     }` : ''}
+    // what the section boxes leave out is faded, not dropped, when the scene asks for that
+    color.a *= keep;
 }
 `
 
@@ -153,7 +159,7 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
 
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
-    if (${edit ? 'loadSplatState().r * 255.0 > 1.5 || ' : ''}sectionCulled(modifiedCenter)) {
+    if (${edit ? 'loadSplatState().r * 255.0 > 1.5 || ' : ''}sectionKeep(modifiedCenter) <= 0.0) {
         *scale = vec3f(0.0);
         return;
     }
@@ -170,7 +176,8 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     ${edit ? 'let state = loadSplatState().r * 255.0;' : ''}
-    if (${edit ? 'state > 1.5 || ' : ''}sectionCulled(center)) {
+    let keep = sectionKeep(center);
+    if (${edit ? 'state > 1.5 || ' : ''}keep <= 0.0) {
         (*color).a = 0.0;
         return;
     }
@@ -181,6 +188,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     ${edit ? `if (state > 0.5) {
         *color = vec4f(mix((*color).rgb, uniform.uSelectTint.rgb, uniform.uSelectTint.a), max((*color).a, 0.35));
     }` : ''}
+    (*color).a = (*color).a * keep;
 }
 `
     return { glsl, wgsl }

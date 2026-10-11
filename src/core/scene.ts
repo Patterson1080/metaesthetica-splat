@@ -55,6 +55,21 @@ export interface SectionBox {
   mode?: 'keep' | 'cut'
   /** false leaves the box in the file but switches it off */
   enabled?: boolean
+  /**
+   * Present the box as a named component: outline it and set its `name` above it and its
+   * `text` below. Default false.
+   */
+  label?: boolean
+  /** Description shown under a labelled box; line breaks are kept */
+  text?: string
+}
+
+/** What happens to the splats the section boxes leave out. */
+export interface SectionRest {
+  /** How visible they stay, 0..1 */
+  opacity: number
+  /** true does not draw them at all, whatever the opacity */
+  hidden: boolean
 }
 
 /** A text callout pinned to a point on the splat. */
@@ -133,6 +148,8 @@ export interface SplatScene {
   poster?: string
   /** Culling volumes; at most MAX_SECTIONS are applied */
   sections?: SectionBox[]
+  /** How the rest of the splat is shown while boxes are on. Absent: not drawn. */
+  sectionRest?: SectionRest
   /** Text callouts pinned to points on the splat */
   annotations?: Annotation[]
   /** Force fields that set splats flowing; at most MAX_FORCES are applied */
@@ -182,6 +199,8 @@ function parseSection(v: unknown): SectionBox | null {
     size: s.size,
     mode: s.mode === 'cut' ? 'cut' : 'keep',
     enabled: s.enabled !== false,
+    label: s.label === true,
+    text: text(s.text),
   }
 }
 
@@ -222,6 +241,19 @@ function parseForce(v: unknown): Force | null {
     enabled: f.enabled !== false,
   }
 }
+
+export const DEFAULT_REST_OPACITY = 0.12
+
+/** Scene files from before the setting existed did not draw the rest, so that is what "absent" means. */
+function parseRest(v: unknown): SectionRest {
+  if (typeof v !== 'object' || v === null) return { opacity: DEFAULT_REST_OPACITY, hidden: true }
+  const r = v as Partial<SectionRest>
+  const opacity = typeof r.opacity === 'number' && Number.isFinite(r.opacity) ? Math.min(Math.max(r.opacity, 0), 1) : DEFAULT_REST_OPACITY
+  return { opacity, hidden: r.hidden === true }
+}
+
+/** The opacity the renderer should give the left-out splats: 0 means do not draw them. */
+export const restOpacity = (rest: SectionRest | undefined) => (!rest || rest.hidden ? 0 : rest.opacity)
 
 const parseList = <T>(v: unknown, parse: (item: unknown) => T | null): T[] =>
   Array.isArray(v) ? v.map(parse).filter((item): item is T => item !== null) : []
@@ -281,6 +313,7 @@ export function parseScene(json: unknown, baseUrl?: string): SplatScene {
     background: raw.background === null ? null : typeof raw.background === 'string' ? raw.background : undefined,
     poster: typeof raw.poster === 'string' ? resolveUrl(raw.poster, baseUrl) : undefined,
     sections: parseList(raw.sections, parseSection),
+    sectionRest: parseRest(raw.sectionRest),
     annotations: parseList(raw.annotations, parseAnnotation),
     forces: parseList(raw.forces, parseForce),
   }

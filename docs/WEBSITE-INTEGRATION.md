@@ -66,14 +66,14 @@ One thing to handle: the lightbox steps between items on the left and right arro
 
 ### Theme
 
-- The player's controls and labels live in a shadow root, so the site's CSS reset and utility classes cannot disturb them. They inherit the page font.
+- The player's controls and labels live in a shadow root, so the site's CSS reset and utility classes cannot disturb them. The controls inherit the page font. Labels are set in Avenir by default, which only Apple systems carry; to keep them in the site's own face (or to serve Avenir as a licensed webfont) set `--splat-label-font`.
 - Colors come in through custom properties: map the site's ink to `--splat-fg` and its accent to `--splat-accent`. Labels take `--splat-label-color`.
 - Keep the stage black in both themes, as the lightbox already does. Captures are trained against dark backgrounds and their soft edges look wrong on white. A transparent canvas is supported for the cases that want it.
 
 ### Section boxes, labels and forces on the site
 
-- **Labels** are real text in the page's type with no background, so they read as part of the site's typography rather than as a 3D overlay. They are in the accessibility tree. Visitors can hide them; a label disappears with the geometry it points at when a section box cuts that away.
-- **Section boxes** and **forces** are part of the scene file, so a work page needs nothing extra to show a cut-away or a flowing version: it points at a different scene file for the same splat.
+- **Labels** are real text with no background: a title in tracked capitals over a ticked hairline, body text beneath. They are in the accessibility tree and visitors can hide them. A section box can carry a label of its own, which presents the box as a named component of the work.
+- **Section boxes** and **forces** are part of the scene file, so a work page needs nothing extra to show a component singled out (the rest faded or hidden) or a flowing version: it points at a different scene file for the same splat.
 - **Forces** animate continuously, so a player showing them keeps rendering while it is on screen (it still stops off-screen). They start stilled for visitors who ask for reduced motion. Scenes with forces ask for WebGPU, where moving splats are layered correctly, and fall back to WebGL 2, where the flow runs but splats carried in front of others can be drawn behind them.
 
 ## Assets

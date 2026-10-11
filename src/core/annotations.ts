@@ -2,14 +2,20 @@ import { Mat4, type Entity } from 'playcanvas'
 import { DEFAULT_ANNOTATION_OFFSET, type Annotation } from './scene'
 
 /**
- * Styles for the callout layer. It is a string because the layer lives in two places: the
- * player's shadow root and the editor's viewport.
+ * Styles for the label layers (pinned callouts and section frames). It is a string because
+ * the layers live in two places: the player's shadow root and the editor's viewport.
  *
- *   --splat-label-color   text, leader line and dot   (default: --splat-fg, then #fff)
+ * The look is a title in tracked capitals over a hairline rule with a tick at each end, and
+ * plain text under it. No fills: legibility over the splat comes from a halo in the stage
+ * color (--splat-bg).
+ *
+ *   --splat-label-font    typeface                    (default: Avenir Next / Avenir, then system sans)
+ *   --splat-label-color   text, rules, leader and dot (default: --splat-fg, then #fff)
  *   --splat-label-bg      fill behind the text        (default: transparent)
- *   --splat-label-width   widest a callout may get    (default: 15em)
+ *   --splat-label-width   widest a callout may get    (default: 18em)
  *
- * With no fill, legibility over the splat comes from a halo in the stage color (--splat-bg).
+ * Avenir ships with Apple systems only. Elsewhere the stack falls through to the system
+ * sans unless the page provides the face and names it in --splat-label-font.
  */
 export const annotationCss = /* css */ `
 .sa-layer {
@@ -18,18 +24,58 @@ export const annotationCss = /* css */ `
   overflow: hidden;
   pointer-events: none;
   color: var(--splat-label-color, var(--splat-fg, #fff));
-  font-size: 13px;
-  line-height: 1.35;
+  font-family: var(--splat-label-font, "Avenir Next", Avenir, "Avenir LT Std", "Avenir LT Pro", "Segoe UI", system-ui, sans-serif);
+  font-size: 12px;
+  line-height: 17px;
+  text-shadow: 0 0 2px var(--splat-bg, #000), 0 0 5px var(--splat-bg, #000), 0 0 10px var(--splat-bg, #000);
 }
 .sa-layer[hidden] { display: none; }
+
+/* the shared parts: a title in tracked capitals, a ruled line with end ticks, body text */
+.sa-title {
+  display: block;
+  height: 17px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sa-rule {
+  display: block;
+  position: relative;
+  height: 1px;
+  background: currentColor;
+  box-shadow: 0 0 2px var(--splat-bg, #000);
+}
+.sa-rule::before, .sa-rule::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 1px;
+  height: 7px;
+  background: currentColor;
+}
+.sa-rule::before { left: 0; }
+.sa-rule::after { right: 0; }
+.sa-text {
+  display: block;
+  white-space: pre-line;
+  letter-spacing: 0.03em;
+  overflow-wrap: anywhere;
+}
+
+/* ── pinned callouts ── */
 .sa-item { position: absolute; left: 0; top: 0; }
 .sa-item[hidden] { display: none; }
 .sa-dot {
   position: absolute;
-  left: -4px;
-  top: -4px;
-  width: 8px;
-  height: 8px;
+  left: -3px;
+  top: -3px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--splat-bg, #000) 55%, transparent);
@@ -47,24 +93,36 @@ export const annotationCss = /* css */ `
   top: 0;
   box-sizing: border-box;
   width: max-content;
-  max-width: var(--splat-label-width, 15em);
-  padding: 5px 2px 2px;
-  /* the leader line arrives at this rule and runs on along the top of the text */
-  border-top: 1px solid currentColor;
+  min-width: 6em;
+  max-width: var(--splat-label-width, 18em);
   background: var(--splat-label-bg, transparent);
-  text-shadow: 0 0 2px var(--splat-bg, #000), 0 0 5px var(--splat-bg, #000), 0 0 10px var(--splat-bg, #000);
-  overflow-wrap: anywhere;
 }
+/* the leader meets the rule, so a title rides above the point the label is placed at */
+.sa-label.titled { margin-top: -23px; }
+.sa-label .sa-text { padding-top: 7px; }
 .sa-label.left { text-align: right; }
-.sa-title { display: block; font-weight: 600; }
-.sa-text { display: block; white-space: pre-line; opacity: 0.88; }
-.sa-title + .sa-text { margin-top: 1px; }
+.sa-empty { opacity: 0.6; }
+.sa-layer:not(.editable) .sa-empty { display: none; }
 
 /* editing: the dot and the text become handles */
 .sa-layer.editable .sa-dot, .sa-layer.editable .sa-label { pointer-events: auto; touch-action: none; cursor: grab; }
 .sa-layer.editable .sa-dot { left: -6px; top: -6px; width: 12px; height: 12px; }
 .sa-layer.editable .sa-item.selected { color: #ffc81a; }
-.sa-layer.editable .sa-label:empty::before { content: "Empty label"; opacity: 0.6; }
+
+/* ── section frames: a box outlined as a hairline cube, named above and described below ── */
+.sf-item { position: absolute; inset: 0; }
+.sf-item[hidden] { display: none; }
+.sf-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.sf-edges line { stroke: currentColor; stroke-width: 1; opacity: 0.85; }
+.sf-head, .sf-foot { position: absolute; left: 0; top: 0; box-sizing: border-box; }
+.sf-head .sa-title {
+  height: 24px;
+  margin-bottom: 10px;
+  font-size: 17px;
+  line-height: 24px;
+  text-align: center;
+}
+.sf-foot .sa-text { padding-bottom: 12px; font-size: 13px; line-height: 19px; }
 `
 
 export interface AnnotationHandlers {
@@ -169,6 +227,7 @@ export class AnnotationLayer {
     const dot = document.createElement('span')
     dot.className = 'sa-dot'
 
+    // title, then the rule the leader runs into, then the text
     const label = document.createElement('div')
     label.className = 'sa-label'
     if (annotation.title) {
@@ -176,11 +235,16 @@ export class AnnotationLayer {
       title.className = 'sa-title'
       title.textContent = annotation.title
       label.append(title)
+      label.classList.add('titled')
     }
-    if (annotation.text) {
+    const rule = document.createElement('i')
+    rule.className = 'sa-rule'
+    label.append(rule)
+    if (annotation.text || !annotation.title) {
       const body = document.createElement('span')
-      body.className = 'sa-text'
-      body.textContent = annotation.text
+      body.className = annotation.text ? 'sa-text' : 'sa-text sa-empty'
+      // an empty label still needs something to grab in the editor
+      body.textContent = annotation.text || 'Empty label'
       label.append(body)
     }
 

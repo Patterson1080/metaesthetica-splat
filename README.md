@@ -48,11 +48,15 @@ npm run sample     # regenerate the procedural sample splats in public/samples/
 
 Add a *keep* or *cut* box, press **Edit** on its row, and the move, rotate and scale tools act on the box instead of the splat (Esc hands them back). A new keep box starts as a slice through the middle, facing the camera, so it does something the moment it appears.
 
-Boxes are non-destructive and the player lets viewers switch them off. While a box is on, selection only touches what is visible, so a box doubles as a mask for cleaning up. **Delete hidden splats** makes the cut permanent, which also shrinks the export.
+Boxes are non-destructive and the player lets viewers switch them off. What the boxes leave out is either **faded** (the *Rest of the splat* opacity slider) or, with **Hide the rest**, not drawn at all, so a box can single out one part while the whole stays faintly present. While a box is on, selection only touches what is in full view, so a box doubles as a mask for cleaning up. **Delete the rest** makes the cut permanent, which also shrinks the export.
+
+A box can also stand for a **component** of the splat. Tick *Label this box* and the player outlines it as a hairline cube with the box's name set above it and a description below.
 
 ### Labels
 
-With the Label tool (`A`), click the splat to pin a label; drag its text to move it, drag its dot to re-pin it. Each label has a title and optional body text. They are drawn as real HTML text over the canvas with **no background**: a hairline leader, the text, and a soft halo in the stage color for legibility. That keeps them sharp at any pixel ratio, in the page's own typeface, and readable by assistive technology. A label whose point is cut away by a section box disappears with it.
+With the Label tool (`A`), click the splat to pin a label; drag its text to move it, drag its dot to re-pin it. Each label has a title and optional body text.
+
+Pinned labels and box labels share one look: a title in tracked capitals over a hairline rule with a tick at each end, plain text beneath, and **no background**, only a soft halo in the stage color for legibility. They are real HTML text over the canvas, so they stay sharp at any pixel ratio and are readable by assistive technology. The typeface is Avenir (`Avenir Next`, then `Avenir`). Avenir ships with Apple systems only, so elsewhere the labels fall back to the system sans unless the page provides the face and names it in `--splat-label-font`. A label whose point is no longer drawn (hidden by a section box, not merely faded) disappears with it.
 
 ### Forces
 
@@ -159,9 +163,10 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
 | `--splat-fg` | `#fff` | text and icons |
 | `--splat-accent` | `--splat-fg` | focus ring and progress bar |
 | `--splat-radius` | `0` | corner radius of the stage |
-| `--splat-label-color` | `--splat-fg` | label text, leader and dot |
+| `--splat-label-font` | Avenir Next, Avenir, system sans | label typeface |
+| `--splat-label-color` | `--splat-fg` | label text, rules, leader and dot |
 | `--splat-label-bg` | `transparent` | fill behind label text, if one is wanted after all |
-| `--splat-label-width` | `15em` | widest a label may get |
+| `--splat-label-width` | `18em` | widest a pinned label may get |
 
 ### Scene file
 
@@ -176,8 +181,10 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
   "background": "#000000",
   "poster": "piece.webp",
   "sections": [
-    { "name": "Slice", "position": [-1.1, 0, 0], "rotation": [0, 0, 0], "size": [3, 3, 6], "mode": "keep" }
+    { "name": "Far loop", "position": [-0.95, 0.05, 0], "rotation": [0, 0, 0], "size": [1.5, 1.9, 2.9], "mode": "keep",
+      "label": true, "text": "Shown under the box when it is labelled." }
   ],
+  "sectionRest": { "opacity": 0.12, "hidden": false },
   "annotations": [
     { "title": "Crest", "text": "Highest point of the loop", "position": [-1, 0.63, 0], "offset": [-70, -52] }
   ],
@@ -191,7 +198,7 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
 }
 ```
 
-`src` and `poster` resolve relative to the scene file, so a scene and its assets can be moved as a folder. Positions are in world space. A label's `offset` is where its text sits relative to its point on screen, in CSS pixels. Up to 8 section boxes and 4 forces are applied. Supported splat formats: `.ply`, `.compressed.ply`, `.sog`, and SOG `meta.json` / streamed `lod-meta.json`. Files served from another origin need CORS headers.
+`src` and `poster` resolve relative to the scene file, so a scene and its assets can be moved as a folder. Positions are in world space. A label's `offset` is where its text sits relative to its point on screen, in CSS pixels. `sectionRest` says how the splats outside the boxes are shown; without it they are not drawn. Up to 8 section boxes and 4 forces are applied. Supported splat formats: `.ply`, `.compressed.ply`, `.sog`, and SOG `meta.json` / streamed `lod-meta.json`. Files served from another origin need CORS headers.
 
 ## Layout
 

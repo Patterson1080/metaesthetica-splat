@@ -109,17 +109,43 @@ export function buildScenePanels(editor: Editor) {
     rotation: vec3Row('Rotation', 5, (rotation) => editSection({ rotation })),
     size: vec3Row('Size', 0.1, (size) => editSection({ size: size.map((v) => Math.max(v, 0.001)) as Vec3Tuple })),
   }
-  const sectionDetail = h('div', { class: 'detail' }, sectionRows.position.node, sectionRows.rotation.node, sectionRows.size.node)
-  const bake = button('Delete hidden splats', () => editor.bakeSections(), {
-    title: 'Make the cut permanent: delete every splat the boxes hide. The export gets smaller; the boxes can then be removed.',
+  // a box can stand for a component of the splat: its name becomes a title, this its description
+  const boxLabel = h('input', { type: 'checkbox' })
+  boxLabel.addEventListener('change', () => editSection({ label: boxLabel.checked }))
+  const boxText = h('textarea', { rows: 3, spellcheck: true, placeholder: 'Description shown under the box (optional)' })
+  boxText.addEventListener('change', () => editSection({ text: boxText.value }))
+  const sectionDetail = h('div', { class: 'detail' },
+    sectionRows.position.node,
+    sectionRows.rotation.node,
+    sectionRows.size.node,
+    h('label', { class: 'check', title: 'Outline the box in the player and set its name above it and the description below' }, boxLabel, 'Label this box (name + description)'),
+    boxText,
+  )
+
+  // what the boxes leave out: faded, or not drawn at all
+  const restSlider = h('input', { type: 'range', min: '0', max: '1', step: '0.01', title: 'How visible the splats outside the boxes stay' })
+  const restValue = h('output', {})
+  restSlider.addEventListener('input', () => {
+    restValue.textContent = Number(restSlider.value).toFixed(2)
+    editor.previewSectionRest(Number(restSlider.value))
+  })
+  restSlider.addEventListener('change', () => editor.commitSectionRest())
+  const restHide = button('Hide the rest', () => editor.setSectionRest({ hidden: !editor.settings.sectionRest.hidden }), {
+    title: 'Stop drawing the splats outside the boxes altogether',
+  })
+  const restRow = h('div', { class: 'column' }, h('h3', {}, 'Rest of the splat'), field('Opacity', restSlider, restValue), h('div', { class: 'row' }, restHide))
+
+  const bake = button('Delete the rest', () => editor.bakeSections(), {
+    title: 'Make the cut permanent: delete every splat outside the boxes, faded or hidden. The export gets smaller; the boxes can then be removed.',
   })
   const sectionPanel = section(
     'Section boxes',
     sectionList.node,
     sectionDetail,
     h('div', { class: 'row' }, button('+ Keep box', () => editor.addSection('keep')), button('+ Cut box', () => editor.addSection('cut'))),
+    restRow,
     h('div', { class: 'row' }, bake),
-    h('p', { class: 'fine' }, 'Boxes hide splats without deleting them, and the player can switch them off. Shown is what lies inside any keep box, minus what lies inside any cut box. Press Edit, then move, rotate and scale the box with tools 1 2 3.'),
+    h('p', { class: 'fine' }, 'Boxes single out part of the splat without deleting anything, and the player can switch them off. In full view is what lies inside any keep box, minus what lies inside any cut box; the rest is faded by the slider, or not drawn. Press Edit to move, rotate and scale a box with tools 1 2 3, and to give it a label.'),
   )
 
   // ── forces ───────────────────────────────────────────────────────────────
@@ -251,8 +277,19 @@ export function buildScenePanels(editor: Editor) {
       sectionRows.position.set(box.position)
       sectionRows.rotation.set(box.rotation)
       sectionRows.size.set(box.size)
+      boxLabel.checked = box.label === true
+      boxText.disabled = box.label !== true
+      if (document.activeElement !== boxText) boxText.value = box.text ?? ''
     }
-    bake.disabled = !editor.settings.sections.some((s) => s.enabled !== false)
+    const anyBox = editor.settings.sections.some((s) => s.enabled !== false)
+    bake.disabled = !anyBox
+    const rest = editor.settings.sectionRest
+    restRow.hidden = editor.settings.sections.length === 0
+    restSlider.disabled = rest.hidden
+    setValue(restSlider, String(rest.opacity))
+    restValue.textContent = rest.opacity.toFixed(2)
+    restHide.textContent = rest.hidden ? 'Show the rest' : 'Hide the rest'
+    restHide.setAttribute('aria-pressed', String(rest.hidden))
 
     forceList.sync()
     const force = activeForce() === null ? null : editor.settings.forces[activeForce()!]

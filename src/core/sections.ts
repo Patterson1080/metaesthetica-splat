@@ -34,7 +34,9 @@ export function activeSections(sections: readonly SectionBox[]): ActiveSections 
 const uniformName = (index: number) => `uSection${index}`
 
 /**
- * Shader source declaring `sectionCulled(worldCenter)` for a given list of box modes. The
+ * Shader source declaring `sectionKeep(worldCenter)`, the share of a splat's opacity that
+ * survives the boxes (1 inside, `uSectionRest` for what they leave out), for a given list
+ * of box modes. The
  * modes are baked into the code and only the matrices are uniforms, so moving a box never
  * recompiles; adding, removing or re-typing one does.
  */
@@ -45,8 +47,8 @@ export function sectionChunk(modes: readonly Mode[]): { glsl: string; wgsl: stri
 
   if (modes.length === 0) {
     return {
-      glsl: 'bool sectionCulled(vec3 p) { return false; }\n',
-      wgsl: 'fn sectionCulled(p: vec3f) -> bool { return false; }\n',
+      glsl: 'float sectionKeep(vec3 p) { return 1.0; }\n',
+      wgsl: 'fn sectionKeep(p: vec3f) -> f32 { return 1.0; }\n',
     }
   }
 
@@ -61,6 +63,11 @@ bool sectionCulled(vec3 p) {
     ${cuts.length ? `if (${any(cuts, (i) => `insideSection(${uniformName(i)}, p)`)}) return true;` : ''}
     return false;
 }
+// how much of a splat at p is shown: all of it, or what is left to the part the boxes leave out
+uniform float uSectionRest;
+float sectionKeep(vec3 p) {
+    return sectionCulled(p) ? uSectionRest : 1.0;
+}
 `
   const wgsl = `
 ${modes.map((_, i) => `uniform ${uniformName(i)}: mat4x4f;`).join('\n')}
@@ -73,13 +80,24 @@ fn sectionCulled(p: vec3f) -> bool {
     ${cuts.length ? `if (${any(cuts, (i) => `insideSection(uniform.${uniformName(i)}, p)`)}) { return true; }` : ''}
     return false;
 }
+uniform uSectionRest: f32;
+fn sectionKeep(p: vec3f) -> f32 {
+    if (sectionCulled(p)) {
+        return uniform.uSectionRest;
+    }
+    return 1.0;
+}
 `
   return { glsl, wgsl }
 }
 
-/** Upload the box matrices. The caller decides when the work buffer is redrawn. */
-export function setSectionUniforms(component: GSplatComponent, active: ActiveSections) {
+/**
+ * Upload the box matrices and how visible the left-out splats stay (0 = not drawn).
+ * The caller decides when the work buffer is redrawn.
+ */
+export function setSectionUniforms(component: GSplatComponent, active: ActiveSections, rest: number) {
   active.matrices.forEach((matrix, i) => component.setParameter(uniformName(i), matrix))
+  component.setParameter('uSectionRest', rest)
 }
 
 /**

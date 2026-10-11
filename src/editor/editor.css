@@ -234,7 +234,7 @@ body:not(.has-doc) .panel { opacity: 0.45; pointer-events: none; }
 .objects li > input[type="text"] { flex: 1; }
 .objects li > button { flex: none; padding: 0 8px; }
 .objects li > button:has(> svg:only-child) { width: 28px; padding: 0; }
-.objects li > button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #111; }
+.objects li > button[aria-pressed="true"], .panel .row > button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #111; }
 .objects li.active > input[type="text"] { border-color: var(--accent); }
 .detail { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
 

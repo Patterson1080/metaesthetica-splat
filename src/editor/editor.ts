@@ -11,22 +11,26 @@ import {
   type TransformGizmo,
 } from 'playcanvas'
 import { AnnotationLayer } from '../core/annotations'
+import { SectionFrameLayer } from '../core/section-frames'
 import { SplatEffects } from '../core/effects'
 import { Emitter } from '../core/events'
 import {
   DEFAULT_ANNOTATION_OFFSET,
   DEFAULT_BACKGROUND,
   DEFAULT_FOV,
+  DEFAULT_REST_OPACITY,
   DEFAULT_ROTATION,
   FORCE_DEFAULTS,
   MAX_FORCES,
   MAX_SECTIONS,
+  restOpacity,
   type Annotation,
   type CameraPose,
   type ControlLimits,
   type Force,
   type ForceType,
   type SectionBox,
+  type SectionRest,
   type SplatScene,
   type Vec3Tuple,
 } from '../core/scene'
@@ -59,6 +63,8 @@ export interface SceneSettings {
   poses: CameraPose[]
   controls: Required<ControlLimits>
   sections: SectionBox[]
+  /** How the splats the boxes leave out are shown */
+  sectionRest: SectionRest
   annotations: Annotation[]
   forces: Force[]
 }
@@ -70,6 +76,8 @@ const defaultSettings = (): SceneSettings => ({
   poses: [],
   controls: { minDistance: 0.1, maxDistance: 50, minPitch: -89, maxPitch: 89, pan: true, autoRotate: 0 },
   sections: [],
+  // in a new scene a cut shows its context faintly; it can be faded further or switched off
+  sectionRest: { opacity: DEFAULT_REST_OPACITY, hidden: false },
   annotations: [],
   forces: [],
 })
@@ -135,6 +143,7 @@ export class Editor {
   readonly history = new History()
   readonly selection: SelectionTools
   readonly callouts: AnnotationLayer
+  readonly frames: SectionFrameLayer
   doc: Doc | null = null
   settings = defaultSettings()
   tool: Tool = 'navigate'
@@ -176,6 +185,7 @@ export class Editor {
 
     // the same callout layer the player uses, stacked over the selection overlay
     this.callouts = new AnnotationLayer(overlay.parentNode!, camera, canvas, overlay.nextSibling)
+    this.frames = new SectionFrameLayer(overlay.parentNode!, camera, canvas, this.callouts.root)
     this.callouts.handlers = {
       onSelect: (index) => this.setActiveAnnotation(index),
       onDragStart: () => this.beginSceneEdit(),
@@ -240,6 +250,7 @@ export class Editor {
     viewer.events.on('update', (dt) => {
       if (this.doc?.effects.advance(dt)) viewer.requestRender()
       this.callouts.update()
+      this.frames.update()
     })
     app.on('prerender', () => this.drawHelpers())
     this.applyTool()
@@ -248,6 +259,7 @@ export class Editor {
   destroy() {
     this.selection.destroy()
     this.callouts.destroy()
+    this.frames.destroy()
     for (const gizmo of Object.values(this.gizmos)) gizmo.destroy()
     this.events.clear()
     this.viewer.destroy()
@@ -327,6 +339,7 @@ export class Editor {
     // deep copies: the editor mutates these in place
     const copy = <T>(list: T[] | undefined): T[] => JSON.parse(JSON.stringify(list ?? []))
     s.sections = copy(scene.sections)
+    s.sectionRest = scene.sectionRest ? { ...scene.sectionRest } : { opacity: DEFAULT_REST_OPACITY, hidden: true }
     s.annotations = copy(scene.annotations)
     s.forces = copy(scene.forces)
   }
@@ -681,8 +694,8 @@ export class Editor {
   // ── scene objects: undo and syncing ──────────────────────────────────────
 
   private snapshotScene() {
-    const { sections, annotations, forces } = this.settings
-    return JSON.stringify({ sections, annotations, forces })
+    const { sections, sectionRest, annotations, forces } = this.settings
+    return JSON.stringify({ sections, sectionRest, annotations, forces })
   }
 
   private restoreScene(snapshot: string) {
@@ -752,12 +765,33 @@ export class Editor {
   }
 
   private applySections() {
-    const { sections, annotations } = this.settings
-    this.doc?.effects.setSections(sections)
+    const { sections, sectionRest, annotations } = this.settings
+    const rest = restOpacity(sectionRest)
+    this.doc?.effects.setSections(sections, rest)
+    // selection and "delete the rest" treat the left-out splats as out of bounds, faded or not
     this.culled = sectionTest(sections)
-    // callouts whose point has been cut away go with it, exactly as in the player
-    this.callouts.set(annotations, this.culled)
+    // callouts whose point is no longer drawn go with it, exactly as in the player
+    this.callouts.set(annotations, rest > 0 ? null : this.culled)
     this.callouts.visible = !!this.doc
+    this.frames.set(sections)
+    this.frames.visible = !!this.doc
+  }
+
+  /** Fade the splats the boxes leave out, or stop drawing them. */
+  setSectionRest(patch: Partial<SectionRest>) {
+    this.editScene('Change the rest of the splat', () => Object.assign(this.settings.sectionRest, patch))
+  }
+
+  /** Slider drags: show the change now, record it once when the drag ends. */
+  previewSectionRest(opacity: number) {
+    this.beginSceneEdit()
+    this.settings.sectionRest.opacity = opacity
+    this.applySections()
+    this.viewer.requestRender(2)
+  }
+
+  commitSectionRest() {
+    this.endSceneEdit('Fade the rest of the splat')
   }
 
   private applyForces() {
@@ -855,10 +889,10 @@ export class Editor {
     if (!doc || !culled || !doc.splat.resource.hasCenters) return
     const hidden = this.untouchable()
     const before = doc.state.deleted
-    this.editFlags('Delete hidden splats', (flags) => {
+    this.editFlags('Delete the rest', (flags) => {
       for (let i = 0; i < flags.length; i++) if (!(flags[i] & DELETED) && hidden(i, flags)) flags[i] = DELETED
     })
-    this.events.emit('notice', `Deleted ${(doc.state.deleted - before).toLocaleString()} splats hidden by the section boxes`)
+    this.events.emit('notice', `Deleted ${(doc.state.deleted - before).toLocaleString()} splats outside the section boxes`)
   }
 
   // ── forces ───────────────────────────────────────────────────────────────
@@ -969,7 +1003,10 @@ export class Editor {
     }
     // left out when empty, so a plain scene stays a short file
     const copy = <T>(list: T[]): T[] => JSON.parse(JSON.stringify(list))
-    if (s.sections.length) scene.sections = copy(s.sections)
+    if (s.sections.length) {
+      scene.sections = copy(s.sections)
+      scene.sectionRest = { ...s.sectionRest }
+    }
     if (s.annotations.length) scene.annotations = copy(s.annotations)
     if (s.forces.length) scene.forces = copy(s.forces)
     return scene
