@@ -10,6 +10,7 @@ import {
   GSplatComponentSystem,
   GSplatHandler,
   RESOLUTION_AUTO,
+  RESOLUTION_FIXED,
   TextureHandler,
   Vec3,
   createGraphicsDevice,
@@ -81,6 +82,7 @@ export class SplatViewer {
   private readonly resizeObserver: ResizeObserver
   private pendingFrames = 0
   private framePending = false
+  private offlineRatio: number | null = null
   private paused = false
   private destroyed = false
   private objectUrls = new Map<Asset, string>()
@@ -179,6 +181,73 @@ export class SplatViewer {
     this.paused = false
     this.app.requestAnimationFrame()
     this.requestRender(2)
+  }
+
+  /**
+   * Offline rendering (video export): take the canvas off the display's clock and give it
+   * an exact pixel size. Frames are then advanced one at a time with `stepFrame`.
+   */
+  beginOffline(width: number, height: number) {
+    if (this.offlineRatio !== null) return
+    this.pause()
+    this.offlineRatio = this.device.maxPixelRatio
+    // the size asked for is the size in pixels, whatever the display's density
+    this.device.maxPixelRatio = 1
+    this.app.setCanvasResolution(RESOLUTION_FIXED, width, height)
+  }
+
+  endOffline() {
+    if (this.offlineRatio === null) return
+    this.device.maxPixelRatio = this.offlineRatio
+    this.offlineRatio = null
+    this.app.setCanvasResolution(RESOLUTION_AUTO)
+    this.resume()
+  }
+
+  /**
+   * Advance the engine to `timestamp` (milliseconds) and draw. On the CPU-sorted renderer the
+   * depth order for a new camera position comes back from a worker a moment later, so this
+   * waits for it and draws once more, without advancing time. The canvas holds the finished
+   * frame when this resolves, and only until the browser next paints: read it straight away.
+   */
+  async stepFrame(timestamp: number) {
+    this.tickOnce(timestamp)
+    // a second pass covers a sort that was already under way when this frame asked for its own
+    for (let pass = 0; pass < 3 && !this.sortState().settled; pass++) {
+      const deadline = performance.now() + SORT_TIMEOUT
+      while (this.sortState().inFlight && performance.now() < deadline) await nextTask()
+      this.tickOnce(timestamp)
+    }
+  }
+
+  private tickOnce(timestamp: number) {
+    this.requestRender()
+    this.app.tick(timestamp)
+    // the tick queued the next display frame; offline, the caller decides when that is
+    if (this.app.frameRequestId) {
+      cancelAnimationFrame(this.app.frameRequestId)
+      this.app.frameRequestId = null as unknown as number
+    }
+  }
+
+  /** Where the splat depth sorts stand: still with the worker, or back and applied. */
+  private sortState(): { inFlight: boolean; settled: boolean } {
+    // engine internals, read defensively: if they move, frames are simply not waited for
+    type Sorter = { jobsInFlight?: number; pendingSorted?: unknown }
+    type LayerData = { gsplatManager?: { cpuSorter?: Sorter | null } | null }
+    type Director = { camerasMap?: Map<unknown, { layersMap?: Map<unknown, LayerData> }> }
+    const director = (this.app.renderer as unknown as { gsplatDirector?: Director }).gsplatDirector
+    let inFlight = false
+    let pending = false
+    director?.camerasMap?.forEach((cameraData) => {
+      cameraData.layersMap?.forEach((layerData) => {
+        const sorter = layerData.gsplatManager?.cpuSorter
+        if (!sorter) return
+        if (sorter.pendingSorted) pending = true
+        else if ((sorter.jobsInFlight ?? 0) > 0) inFlight = true
+      })
+    })
+    return { inFlight, settled: !inFlight && !pending }
   }
 
   /** CSS color for an opaque background, or null for a transparent canvas. */
@@ -353,6 +422,22 @@ function normalizeHex(color: string) {
 }
 
 const SAMPLE_LIMIT = 40_000
+/** Longest to wait for one frame's depth sort before taking the frame as it is, in milliseconds */
+const SORT_TIMEOUT = 3000
+
+/**
+ * Yield to the event loop without a timer. Timers are throttled to once a second when the
+ * page is not in front, which would turn a one-minute render into an hour.
+ */
+export const nextTask = () =>
+  new Promise<void>((resolve) => {
+    const channel = new MessageChannel()
+    channel.port1.onmessage = () => {
+      channel.port1.close()
+      resolve()
+    }
+    channel.port2.postMessage(null)
+  })
 
 function robustBounds(resource: GSplatResourceBase): BoundingBox | null {
   // streamed LOD resources have no CPU-side centers; their stored bounds are the best there is

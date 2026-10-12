@@ -314,6 +314,52 @@ export function bindUi(shell: Shell, editor: Editor) {
   }
   const sogCommand = h('code', {})
   const sogHint = () => (sogCommand.textContent = `npx @playcanvas/splat-transform ${baseName()}.ply ${baseName()}.sog`)
+  // ── video ──
+  const option = (value: string, label: string) => h('option', { value }, label)
+  const videoSize = h('select', { title: 'Width × height of the video, in pixels' },
+    option('1280x720', '1280 × 720 (HD)'),
+    option('1920x1080', '1920 × 1080 (Full HD)'),
+    option('2560x1440', '2560 × 1440'),
+    option('3840x2160', '3840 × 2160 (4K)'),
+    option('1080x1080', '1080 × 1080 (square)'),
+    option('1080x1920', '1080 × 1920 (vertical)'),
+  )
+  videoSize.value = '1920x1080'
+  const videoFps = h('select', {}, option('24', '24 fps'), option('30', '30 fps'), option('60', '60 fps'))
+  videoFps.value = '30'
+  const videoQuality = h('select', {}, option('high', 'High'), option('max', 'Very high (larger file)'))
+  let renderAbort: AbortController | null = null
+  const renderButton = button('Render video (.mp4)', () => {
+    if (renderAbort) return renderAbort.abort()
+    void run(async () => {
+      const [width, height] = videoSize.value.split('x').map(Number)
+      const fps = Number(videoFps.value)
+      renderAbort = new AbortController()
+      renderButton.textContent = 'Cancel render'
+      shell.busy.hidden = false
+      try {
+        const blob = await editor.renderVideo({
+          width,
+          height,
+          fps,
+          quality: videoQuality.value as 'high' | 'max',
+          signal: renderAbort.signal,
+          onProgress: (fraction) => (shell.busy.textContent = `Rendering video… ${Math.round(fraction * 100)}%`),
+        })
+        download(blob, `${baseName()}.mp4`)
+        notice(`Rendered ${baseName()}.mp4: ${editor.animation.duration} s at ${width}×${height}, ${fps} fps, ${(blob.size / 1048576).toFixed(1)} MB`)
+      } catch (error) {
+        // cancelling is not a failure
+        if (!(error instanceof DOMException && error.name === 'AbortError')) throw error
+        notice('Render cancelled')
+      } finally {
+        renderAbort = null
+        renderButton.textContent = 'Render video (.mp4)'
+        shell.busy.hidden = true
+      }
+    })
+  }, { class: 'primary', title: 'Render the timeline from start to end as an H.264 .mp4' })
+
   const exportSection = section(
     'Export',
     field('Name', exportName),
@@ -336,6 +382,12 @@ export function bindUi(shell: Shell, editor: Editor) {
     ),
     h('p', { class: 'fine' }, 'For the web, compress the .ply to .sog (about 15–20× smaller), then point “Splat URL in scene” at it:'),
     h('pre', {}, sogCommand),
+    h('h3', {}, 'Video'),
+    field('Size', videoSize),
+    field('Frame rate', videoFps),
+    field('Quality', videoQuality),
+    h('div', { class: 'column' }, renderButton),
+    h('p', { class: 'fine' }, 'Renders the whole timeline to an .mp4, frame by frame, through the animated camera (or the current view, if the camera has no keys). Labels are not part of the picture: they are drawn by the page, over the canvas.'),
   )
 
   const scenePanels = buildScenePanels(editor)

@@ -28,6 +28,7 @@
     "sample": "node scripts/make-sample.mjs"
   },
   "dependencies": {
+    "mediabunny": "^1.61.3",
     "playcanvas": "2.23.2"
   },
   "devDependencies": {

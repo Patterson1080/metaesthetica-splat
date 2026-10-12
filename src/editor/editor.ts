@@ -39,7 +39,7 @@ import {
   type Vec3Tuple,
 } from '../core/scene'
 import { sectionTest } from '../core/sections'
-import { SplatViewer, tupleOf, type DeviceType, type LoadedSplat, type SplatInput } from '../core/viewer'
+import { SplatViewer, nextTask, tupleOf, type DeviceType, type LoadedSplat, type SplatInput } from '../core/viewer'
 import { History, diffBytes } from './history'
 import { exportPly } from './ply-export'
 import { SelectionTools, type ScreenTest, type SelectMode } from './selection'
@@ -179,6 +179,8 @@ export class Editor {
   autoKey = false
   /** Look through the animated camera; off leaves the viewport free and draws the camera's path */
   followCamera = true
+  /** A video is being rendered: the timeline is stepped by the renderer, not by the clock */
+  rendering = false
 
   private readonly gizmos: Record<(typeof GIZMO_TOOLS)[number], TransformGizmo>
   private gizmoStart: Transform | null = null
@@ -274,7 +276,7 @@ export class Editor {
     })
 
     viewer.events.on('update', (dt) => {
-      if (this.playing) this.stepPlayback(dt)
+      if (this.playing && !this.rendering) this.stepPlayback(dt)
       if (this.doc?.effects.advance(dt)) viewer.requestRender()
       this.callouts.update()
       this.frames.update()
@@ -1006,7 +1008,7 @@ export class Editor {
 
     if (sceneChanged) {
       this.placeNodes()
-      if (this.playing) {
+      if (this.playing || this.rendering) {
         // the light path: uniforms and box frames only, sixty times a second
         doc.effects.setSections(this.settings.sections, restOpacity(this.settings.sectionRest))
         this.frames.refresh()
@@ -1029,7 +1031,7 @@ export class Editor {
       }
     }
 
-    if (!this.playing) {
+    if (!this.playing && !this.rendering) {
       if (splatChanged) {
         this.attachGizmo()
         this.events.emit('transform')
@@ -1370,12 +1372,14 @@ export class Editor {
     }
   }
 
-  /** A still of the current view with the editor's helpers hidden: the player's poster image. */
-  async capturePoster() {
+  /**
+   * Run `task` with the viewport showing only what the player would: no grid, boxes, gizmo,
+   * camera path or selection tint.
+   */
+  private async withCleanView<T>(task: () => Promise<T>): Promise<T> {
     const doc = this.doc
     if (!doc) throw new Error('Nothing to capture')
     const { flags } = doc.state
-    // the poster must look like the player's first frame: no grid, boxes, gizmo or selection tint
     const selected: number[] = []
     for (let i = 0; i < flags.length; i++) if (flags[i] & SELECTED) selected.push(i)
     for (const i of selected) flags[i] = 0
@@ -1385,13 +1389,84 @@ export class Editor {
     try {
       // the tint is removed in the work buffer, which lags the flags by a frame
       this.viewer.app.render()
-      return await this.viewer.capture('image/webp', 0.9)
+      return await task()
     } finally {
       for (const i of selected) flags[i] = SELECTED
       if (selected.length) doc.state.commit()
       this.helpersHidden = false
       this.attachGizmo()
       this.viewer.requestRender(2)
+    }
+  }
+
+  /** A still of the current view with the editor's helpers hidden: the player's poster image. */
+  capturePoster() {
+    return this.withCleanView(() => this.viewer.capture('image/webp', 0.9))
+  }
+
+  /**
+   * Render the timeline, start to end, to an .mp4 (H.264). Frames are stepped one at a time
+   * at exactly `fps`, not captured from the screen, so the result is the same on a slow
+   * machine as on a fast one. The view is the animated camera's; without camera keys it is
+   * wherever the viewport camera is.
+   */
+  async renderVideo(options: { width: number; height: number; fps: number; quality: 'high' | 'max'; onProgress?: (fraction: number) => void; signal?: AbortSignal }): Promise<Blob> {
+    if (!this.doc) throw new Error('Nothing to render')
+    if (this.rendering) throw new Error('A render is already running')
+    // loaded on demand: the encoder is only needed by whoever renders a video
+    const { BufferTarget, CanvasSource, Mp4OutputFormat, Output, QUALITY_HIGH, QUALITY_VERY_HIGH, canEncodeVideo } = await import('mediabunny')
+    // H.264 wants even dimensions
+    const width = Math.max(2, Math.round(options.width / 2) * 2)
+    const height = Math.max(2, Math.round(options.height / 2) * 2)
+    const quality = options.quality === 'max' ? QUALITY_VERY_HIGH : QUALITY_HIGH
+    if (!(await canEncodeVideo('avc', { width, height, quality }))) {
+      throw new Error(`This browser cannot encode H.264 video at ${width}×${height}. Use a current Chrome or Edge, or a smaller size.`)
+    }
+
+    const { fps } = options
+    const frames = Math.max(1, Math.round(this.animation.duration * fps))
+    this.pause()
+    const resumeAt = this.time
+    const follow = this.followCamera
+    this.rendering = true
+    this.followCamera = true
+
+    try {
+      return await this.withCleanView(async () => {
+        this.viewer.beginOffline(width, height)
+        const target = new BufferTarget()
+        const output = new Output({ format: new Mp4OutputFormat(), target })
+        const source = new CanvasSource(this.viewer.canvas, { codec: 'avc', quality })
+        output.addVideoTrack(source, { frameRate: fps })
+        await output.start()
+        try {
+          const clock = performance.now()
+          for (let i = 0; i < frames; i++) {
+            if (options.signal?.aborted) throw new DOMException('Render cancelled', 'AbortError')
+            this.time = i / fps
+            this.applyTime()
+            await this.viewer.stepFrame(clock + (i * 1000) / fps)
+            // the canvas is read here, in the same task that drew it
+            await source.add(i / fps, 1 / fps)
+            options.onProgress?.((i + 1) / frames)
+            // let the page paint the progress now and then
+            if (i % 6 === 5) await nextTask()
+          }
+          await output.finalize()
+          if (!target.buffer) throw new Error('The encoder produced no data')
+          return new Blob([target.buffer], { type: 'video/mp4' })
+        } catch (error) {
+          await output.cancel().catch(() => {})
+          throw error
+        } finally {
+          this.viewer.endOffline()
+        }
+      })
+    } finally {
+      this.rendering = false
+      this.followCamera = follow
+      this.setTime(resumeAt)
+      this.afterPlayback()
     }
   }
 

@@ -36,7 +36,7 @@ npm run sample     # regenerate the procedural sample splats in public/samples/
    - **Forces** set the splat's own points flowing: swirl, wind, attract/repel, turbulence.
 5. **Animate** (optional). Keyframe the splat, the camera, forces and section boxes on the timeline.
 6. **Stage.** Field of view, start view, saved viewpoints, zoom and pitch limits, auto-rotate, background. *Preview* runs the real player on the edited scene.
-7. **Export** the splat (`.ply`), the scene (`.scene.json`) and a poster (`.webp`).
+7. **Export** the splat (`.ply`), the scene (`.scene.json`) and a poster (`.webp`), or **render** the timeline to a video (`.mp4`).
 8. **Compress for the web** and point the scene at the result:
 
    ```sh
@@ -107,6 +107,20 @@ As in Blender, an animated property shows its value at the playhead. If you chan
 **Through camera** makes the viewport look through the animated camera. Turn it off to move around freely while the animation plays; the camera's path is then drawn in the viewport, with a cross at each key.
 
 The animation is saved in the scene file and the player plays it. A force's travel time cannot be keyed: every moving splat's place along its path is derived from it, so changing it mid-flight would make the whole flow jump.
+
+### Rendering a video
+
+**Export → Video → Render video (.mp4)** renders the whole timeline, start to end, to an H.264 `.mp4`. Choose a size (720p up to 4K, square or vertical), a frame rate (24, 30 or 60) and a quality.
+
+It is a true offline render, not a screen recording: the timeline is stepped one frame at a time at exactly the chosen rate, each frame waits for its depth sort before it is taken, and the canvas is rendered at the chosen size whatever the size of your window. The picture is the animated camera's view; if the camera has no keys, it is wherever the viewport camera is. The grid, gizmos, box outlines and selection highlight are left out. Forces run on the same stepped clock, so the flow is smooth at any frame rate.
+
+Things to know:
+
+- **Labels are not in the video.** Pinned labels and box labels are HTML drawn by the page over the canvas, and the render captures the canvas.
+- The output's shape is the size you choose, not your viewport's, so a vertical render frames the scene differently from what a wide window shows. The vertical field of view is what stays fixed.
+- It needs a browser that can encode H.264 through WebCodecs: current Chrome or Edge. The button reports it if the browser cannot.
+- For forces, render with the editor on WebGPU (`?device=webgpu`), for the same depth-ordering reason as in the player.
+- There is no sound track.
 
 ### Editor shortcuts
 
@@ -269,4 +283,5 @@ How it works: the engine copies every splat into a work buffer before drawing an
 - The player bundle is about 430 kB gzipped, nearly all of it engine. Import it dynamically so it never weighs on pages without a splat.
 - `public/samples/knot-clean.sog` was made with `splat-transform` from `knot-clean.ply`; regenerate it if you change the sample script.
 - `.spz` is not wired up (the engine's parser needs a separate zstd wasm module).
+- Video encoding uses [Mediabunny](https://mediabunny.dev) (MPL-2.0), loaded only when a render starts. It is not part of the player library.
 - Not yet tested: touch gestures on real devices, Safari and Firefox, and a real capture with spherical harmonics.
