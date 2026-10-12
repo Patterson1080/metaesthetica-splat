@@ -26,6 +26,7 @@ export class SplatEffects {
   private key: string | null = null
   private time = 0
   private rest = 0
+  private reach = -1
   private readonly ownBounds: BoundingBox | null
 
   constructor(
@@ -51,8 +52,9 @@ export class SplatEffects {
   setForces(forces: readonly Force[]) {
     this.forces = activeForces(forces)
     // splats carried outside the splat's own bounds must not be culled with them
-    if (this.ownBounds) {
-      const reach = maxDisplacement(forces)
+    const reach = maxDisplacement(forces)
+    if (this.ownBounds && Math.abs(reach - this.reach) > 1e-3) {
+      this.reach = reach
       const bounds = this.ownBounds.clone()
       bounds.halfExtents.x += reach
       bounds.halfExtents.y += reach

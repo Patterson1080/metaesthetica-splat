@@ -129,6 +129,36 @@ export interface Force {
   enabled?: boolean
 }
 
+export interface Keyframe {
+  /** Seconds from the start */
+  t: number
+  /** The value at that time: a number, or a vector for positions, rotations and sizes */
+  v: number | number[]
+  /** How the value travels to the next key: 'smooth' (default), 'linear', or 'hold' */
+  ease?: 'smooth' | 'linear' | 'hold'
+}
+
+export interface Track {
+  /**
+   * What is animated, as a path: `splat.position|rotation|scale`, `camera.position|target|fov`,
+   * `force.<n>.<property>`, `section.<n>.position|rotation|size`, `rest.opacity`
+   */
+  target: string
+  /** In time order */
+  keys: Keyframe[]
+}
+
+/** Keyframed motion for the splat, the camera, forces and section boxes. */
+export interface Animation {
+  /** Length in seconds */
+  duration: number
+  /** Start again at the end. Default true. */
+  loop?: boolean
+  /** Start playing as soon as the scene is shown. Default true. */
+  autoplay?: boolean
+  tracks: Track[]
+}
+
 export interface SplatScene {
   version: 1
   name?: string
@@ -154,6 +184,8 @@ export interface SplatScene {
   annotations?: Annotation[]
   /** Force fields that set splats flowing; at most MAX_FORCES are applied */
   forces?: Force[]
+  /** Keyframed motion; the player plays it */
+  animation?: Animation
 }
 
 /** Section boxes are evaluated per splat on the GPU, one uniform each */
@@ -255,6 +287,35 @@ function parseRest(v: unknown): SectionRest {
 /** The opacity the renderer should give the left-out splats: 0 means do not draw them. */
 export const restOpacity = (rest: SectionRest | undefined) => (!rest || rest.hidden ? 0 : rest.opacity)
 
+export const DEFAULT_DURATION = 10
+
+function parseAnimation(v: unknown): Animation | undefined {
+  if (typeof v !== 'object' || v === null) return undefined
+  const a = v as Partial<Animation>
+  const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
+  const tracks: Track[] = []
+  for (const track of Array.isArray(a.tracks) ? a.tracks : []) {
+    if (typeof track !== 'object' || track === null || typeof track.target !== 'string' || !Array.isArray(track.keys)) continue
+    const keys: Keyframe[] = []
+    for (const key of track.keys) {
+      if (typeof key !== 'object' || key === null || !finite(key.t)) continue
+      const value = key.v
+      const valid = finite(value) || (Array.isArray(value) && value.length > 0 && value.length <= 4 && value.every(finite))
+      if (!valid) continue
+      const ease = key.ease === 'linear' || key.ease === 'hold' ? key.ease : undefined
+      keys.push({ t: Math.max(key.t, 0), v: Array.isArray(value) ? [...value] : value, ...(ease ? { ease } : {}) })
+    }
+    if (keys.length) tracks.push({ target: track.target, keys: keys.sort((x, y) => x.t - y.t) })
+  }
+  if (tracks.length === 0) return undefined
+  return {
+    duration: finite(a.duration) && a.duration > 0 ? a.duration : DEFAULT_DURATION,
+    loop: a.loop !== false,
+    autoplay: a.autoplay !== false,
+    tracks,
+  }
+}
+
 const parseList = <T>(v: unknown, parse: (item: unknown) => T | null): T[] =>
   Array.isArray(v) ? v.map(parse).filter((item): item is T => item !== null) : []
 
@@ -316,6 +377,7 @@ export function parseScene(json: unknown, baseUrl?: string): SplatScene {
     sectionRest: parseRest(raw.sectionRest),
     annotations: parseList(raw.annotations, parseAnnotation),
     forces: parseList(raw.forces, parseForce),
+    animation: parseAnimation(raw.animation),
   }
 }
 

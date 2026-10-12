@@ -1,13 +1,14 @@
+import { evaluate, writeSceneValue, type AnimatedScene } from '../core/animation'
 import { AnnotationLayer } from '../core/annotations'
 import { Emitter } from '../core/events'
-import { fetchScene, parseScene, restOpacity, sceneFromSrc, DEFAULT_BACKGROUND, DEFAULT_FOV, type CameraPose, type DeviceType, type SplatScene } from '../core/scene'
+import { fetchScene, parseScene, restOpacity, sceneFromSrc, DEFAULT_BACKGROUND, DEFAULT_FOV, type CameraPose, type DeviceType, type SplatScene, type Vec3Tuple } from '../core/scene'
 import { SplatEffects } from '../core/effects'
 import { SectionFrameLayer } from '../core/section-frames'
 import { sectionTest } from '../core/sections'
 import { SplatViewer } from '../core/viewer'
 import { icons, playerCss } from './style'
 
-export type { Annotation, CameraPose, ControlLimits, DeviceType, Force, ForceType, SectionBox, SplatScene, SplatSource, Vec3Tuple } from '../core/scene'
+export type { Animation, Annotation, CameraPose, ControlLimits, DeviceType, Force, ForceType, Keyframe, SectionBox, SplatScene, SplatSource, Track, Vec3Tuple } from '../core/scene'
 
 export interface SplatPlayerOptions {
   /** A scene file URL (from the editor's "Export scene"), or the scene object itself */
@@ -45,6 +46,11 @@ export interface SplatPlayerOptions {
    * their system for reduced motion; either way the viewer can toggle them.
    */
   forces?: boolean
+  /**
+   * Start the scene's keyframed animation by itself. Default: what the scene says (true),
+   * and false for viewers who ask their system for reduced motion.
+   */
+  autoplay?: boolean
   /** Accessible name for the 3D view */
   label?: string
   /** Text of the start button in 'click' mode */
@@ -125,6 +131,9 @@ export class SplatPlayer {
     sections: HTMLButtonElement
     annotations: HTMLButtonElement
     forces: HTMLButtonElement
+    transport: HTMLElement
+    play: HTMLButtonElement
+    scrub: HTMLInputElement
     live: HTMLElement
   }
 
@@ -136,6 +145,11 @@ export class SplatPlayer {
   private sectionsOn: boolean
   private annotationsOn: boolean
   private forcesOn: boolean
+  /** The scene's forces, boxes and fade as they are right now: the scene's own, moved by its animation */
+  private live: AnimatedScene | null = null
+  private clock = 0
+  private animating = false
+  private cameraAnimated = false
   private initialPose: CameraPose | null = null
   private poseIndex = -1
   private _state: PlayerState = 'idle'
@@ -285,6 +299,42 @@ export class SplatPlayer {
     this.applySceneLayers()
   }
 
+  /** Length of the scene's animation in seconds; 0 when it has none */
+  get duration() {
+    return this.scene?.animation?.duration ?? 0
+  }
+
+  /** Where the animation is, in seconds */
+  get time() {
+    return this.clock
+  }
+
+  get playing() {
+    return this.animating
+  }
+
+  /** Play the scene's keyframed animation from where it is (from the start, if it has ended). */
+  play() {
+    if (!this.scene?.animation || !this.viewer) return
+    if (this.clock >= this.duration - 1e-3) this.clock = 0
+    this.animating = true
+    this.viewer.requestRender()
+    this.syncTransport()
+  }
+
+  pause() {
+    this.animating = false
+    this.syncTransport()
+  }
+
+  /** Jump to a time in the animation, in seconds. */
+  seek(seconds: number) {
+    if (!this.scene?.animation) return
+    this.clock = Math.min(Math.max(seconds, 0), this.duration)
+    this.applyAnimation()
+    this.syncTransport()
+  }
+
   toggleFullscreen() {
     if (document.fullscreenElement === this.host) void document.exitFullscreen()
     else void this.host.requestFullscreen?.().catch(() => {})
@@ -324,6 +374,13 @@ export class SplatPlayer {
           : sceneFromSrc(options.src!)
     if (this.destroyed) throw aborted()
     this.scene = scene
+    // copies, because the animation writes into them every frame
+    this.live = JSON.parse(JSON.stringify({
+      forces: scene.forces ?? [],
+      sections: scene.sections ?? [],
+      sectionRest: scene.sectionRest ?? { opacity: 0, hidden: true },
+    }))
+    this.cameraAnimated = scene.animation?.tracks.some((track) => track.target.startsWith('camera.')) ?? false
     if (!this.ui.poster) this.setPoster(scene.poster)
 
     const background = options.background !== undefined ? options.background : scene.background !== undefined ? scene.background : DEFAULT_BACKGROUND
@@ -363,7 +420,11 @@ export class SplatPlayer {
     if (limits.pan !== undefined) controls.limits.pan = limits.pan
     controls.autoRotate = prefersReducedMotion() ? 0 : (options.autoRotate ?? limits.autoRotate ?? 0)
     controls.wheelEnabled = this.interaction === 'always'
-    controls.onInteract = () => this.host.removeAttribute('data-hint')
+    controls.onInteract = () => {
+      this.host.removeAttribute('data-hint')
+      // taking hold of the view stops an animated camera; the play button hands it back
+      if (this.animating && this.cameraAnimated) this.pause()
+    }
     this.bindInteraction(canvas)
 
     // a lost context cannot be repaired in place; say so instead of showing a frozen frame
@@ -388,7 +449,10 @@ export class SplatPlayer {
     this.callouts = new AnnotationLayer(this.shadow, viewer.camera, canvas, this.ui.center)
     this.frames = new SectionFrameLayer(this.shadow, viewer.camera, canvas, this.callouts.root)
     this.applySceneLayers()
+    // open on the animation's first moment rather than on the scene's resting values
+    this.applyAnimation()
     viewer.events.on('update', (dt) => {
+      if (this.animating) this.stepAnimation(dt)
       // running forces move splats every frame, so the picture is never still
       let moving = false
       for (const effect of this.effects) moving = effect.advance(dt) || moving
@@ -405,6 +469,13 @@ export class SplatPlayer {
     this.ui.poses.hidden = this.poses.length === 0
     this.setState('ready')
     this.host.toggleAttribute('data-hint', true)
+    if (scene.animation) {
+      this.ui.transport.hidden = false
+      this.host.toggleAttribute('data-animated', true)
+      this.ui.scrub.max = String(scene.animation.duration)
+      if (options.autoplay ?? (scene.animation.autoplay !== false && !prefersReducedMotion())) this.play()
+      this.syncTransport()
+    }
     // an embed that loaded offscreen (eager) should not spin until it is seen
     if (!this.visible) viewer.pause()
     this.events.emit('load')
@@ -437,11 +508,11 @@ export class SplatPlayer {
   private applySceneLayers() {
     const scene = this.scene
     if (!scene) return
-    const sections = scene.sections ?? []
+    const sections = this.live?.sections ?? []
     const annotations = scene.annotations ?? []
-    const forces = scene.forces ?? []
+    const forces = this.live?.forces ?? []
     const active = this.sectionsOn ? sections : []
-    const rest = restOpacity(scene.sectionRest)
+    const rest = restOpacity(this.live?.sectionRest)
     const labelled = sections.filter((box) => box.label === true && box.enabled !== false)
     for (const effect of this.effects) {
       effect.setSections(active, rest)
@@ -461,6 +532,79 @@ export class SplatPlayer {
     this.syncToggle(this.ui.annotations, annotations.length > 0 || labelled.length > 0, this.annotationsOn, 'Hide labels', 'Show labels')
     this.syncToggle(this.ui.forces, forces.length > 0, this.forcesOn, 'Still the flow', 'Set it flowing')
     this.viewer?.requestRender(3)
+  }
+
+  // ── animation ────────────────────────────────────────────────────────────
+
+  private stepAnimation(dt: number) {
+    const animation = this.scene?.animation
+    if (!animation) return
+    let t = this.clock + dt
+    if (t >= animation.duration) {
+      if (animation.loop !== false) t %= animation.duration
+      else {
+        t = animation.duration
+        this.animating = false
+      }
+    }
+    this.clock = t
+    this.applyAnimation()
+    this.syncTransport()
+  }
+
+  /** Sample the scene's animation at the clock and move everything it animates. */
+  private applyAnimation() {
+    const { viewer, live } = this
+    const animation = this.scene?.animation
+    if (!viewer || !live || !animation) return
+    const entity = viewer.splats[0]?.entity
+    const camera: { position?: number[]; target?: number[]; fov?: number } = {}
+    let sceneChanged = false
+
+    evaluate(animation, this.clock, (ref, value) => {
+      if (ref.kind === 'splat') {
+        if (!entity || typeof value === 'number') return
+        if (ref.prop === 'position') entity.setLocalPosition(value[0], value[1], value[2])
+        else if (ref.prop === 'rotation') entity.setLocalEulerAngles(value[0], value[1], value[2])
+        else entity.setLocalScale(Math.max(value[0], 1e-3), Math.max(value[1], 1e-3), Math.max(value[2], 1e-3))
+      } else if (ref.kind === 'camera') {
+        if (ref.prop === 'fov') {
+          if (typeof value === 'number') camera.fov = value
+        } else if (typeof value !== 'number') camera[ref.prop as 'position' | 'target'] = value
+      } else if (writeSceneValue(live, ref, value)) {
+        sceneChanged = true
+      }
+    })
+
+    if (sceneChanged) {
+      // uniforms and box outlines only: this runs every frame
+      const rest = restOpacity(live.sectionRest)
+      for (const effect of this.effects) {
+        effect.setSections(this.sectionsOn ? live.sections : [], rest)
+        effect.setForces(this.forcesOn ? live.forces : [])
+      }
+      this.frames?.refresh()
+    }
+    if (camera.position || camera.target) {
+      const pose = viewer.controls.getPose()
+      viewer.controls.setPose({
+        position: (camera.position as Vec3Tuple | undefined) ?? pose.position,
+        target: (camera.target as Vec3Tuple | undefined) ?? pose.target,
+      })
+    }
+    if (camera.fov !== undefined) viewer.setFov(camera.fov)
+    viewer.requestRender(2)
+  }
+
+  private syncTransport() {
+    const { play, scrub } = this.ui
+    const label = this.animating ? 'Pause' : 'Play'
+    if (play.title !== label) {
+      play.title = label
+      play.setAttribute('aria-label', label)
+      play.innerHTML = this.animating ? icons.pause : icons.play
+    }
+    scrub.value = String(this.clock)
   }
 
   private syncToggle(node: HTMLButtonElement, available: boolean, on: boolean, whenOn: string, whenOff: string) {
@@ -527,6 +671,9 @@ export class SplatPlayer {
       this.setAnnotationsVisible(!this.annotationsOn)
     } else if (key === 'c' && this.scene?.sections?.length) {
       this.setSectionsEnabled(!this.sectionsOn)
+    } else if (key === ' ' && this.scene?.animation) {
+      if (this.animating) this.pause()
+      else this.play()
     } else if (key === ' ' && this.scene?.forces?.length) {
       this.setForcesEnabled(!this.forcesOn)
     } else if (key === '[' || key === ']') {
@@ -586,6 +733,22 @@ export class SplatPlayer {
     tools.append(forces, annotations, sections, button('Reset view', icons.reset, () => this.reset()))
     if (fullscreen) tools.append(fullscreen)
 
+    // play / pause and a scrubber, shown only for scenes that carry an animation
+    const play = button('Play', icons.play, () => (this.animating ? this.pause() : this.play()))
+    const scrub = el('input')
+    scrub.type = 'range'
+    scrub.min = '0'
+    scrub.step = '0.01'
+    scrub.value = '0'
+    scrub.setAttribute('aria-label', 'Animation time')
+    scrub.addEventListener('input', () => {
+      this.pause()
+      this.seek(Number(scrub.value))
+    })
+    const transport = el('div', 'bar middle')
+    transport.hidden = true
+    transport.append(play, scrub)
+
     const hint = el('div', 'hint')
     hint.textContent =
       this.interaction === 'always'
@@ -595,15 +758,15 @@ export class SplatPlayer {
     // read by assistive tech as the description of the canvas
     const help = el('div', 'sr-only')
     help.id = 'splat-help'
-    help.textContent = 'Arrow keys orbit. Plus and minus zoom. R resets the view. F toggles full screen. Bracket keys step through saved viewpoints. L shows or hides labels. C switches the cut-away. Space starts or stills the flow.'
+    help.textContent = 'Arrow keys orbit. Plus and minus zoom. R resets the view. F toggles full screen. Bracket keys step through saved viewpoints. L shows or hides labels. C switches the cut-away. Space plays or pauses the animation, or starts and stills the flow.'
 
     const live = el('div', 'sr-only')
     live.setAttribute('role', 'status')
     live.setAttribute('aria-live', 'polite')
 
     this.shadow.append(center, progress, hint, help, live)
-    if (showUi) this.shadow.append(poses, tools)
-    return { poster: null, center, progress, progressFill: progress.firstElementChild as HTMLElement, poses, poseLabel, fullscreen: showUi ? fullscreen : null, sections, annotations, forces, live }
+    if (showUi) this.shadow.append(poses, transport, tools)
+    return { poster: null, center, progress, progressFill: progress.firstElementChild as HTMLElement, poses, poseLabel, fullscreen: showUi ? fullscreen : null, sections, annotations, forces, transport, play, scrub, live }
   }
 
   private setPoster(url: string | undefined) {
@@ -658,7 +821,7 @@ export class SplatPlayer {
  * ```
  *
  * Attributes mirror the options: scene, src, poster, load, interaction, background
- * ("transparent" for none), auto-rotate, label, device, no-ui, no-sections, no-annotations, no-forces. It fires `splat-load`, `splat-error`
+ * ("transparent" for none), auto-rotate, label, device, no-ui, no-sections, no-annotations, no-forces, no-autoplay. It fires `splat-load`, `splat-error`
  * and `splat-progress` events. The player instance is on the element's `player` property.
  */
 export function defineSplatPlayerElement(tag = 'splat-player') {
@@ -704,6 +867,7 @@ export function defineSplatPlayerElement(tag = 'splat-player') {
         sections: !this.hasAttribute('no-sections'),
         annotations: !this.hasAttribute('no-annotations'),
         forces: this.hasAttribute('no-forces') ? false : undefined,
+        autoplay: this.hasAttribute('no-autoplay') ? false : undefined,
         device: attr('device') as SplatPlayerOptions['device'],
       })
       player.on('load', () => this.dispatchEvent(new CustomEvent('splat-load')))

@@ -94,6 +94,12 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .bar.end { right: 10px; }
 .bar.start { left: 10px; }
+.bar.middle { left: 50%; transform: translateX(-50%); gap: 6px; padding-right: 10px; }
+.bar.middle input[type="range"] { width: clamp(90px, 22cqw, 260px); height: 18px; margin: 0; accent-color: var(--splat-accent, var(--splat-fg, #fff)); cursor: pointer; }
+/* in a narrow player the three bars cannot share a line, so the transport takes the one above */
+@container (max-width: 600px) { .bar.middle { bottom: 56px; } }
+/* the transport sits where the hint would; an animated scene explains itself */
+:host([data-animated]) .hint { display: none; }
 :host([data-state="ready"]) .bar { opacity: 0.85; pointer-events: auto; }
 :host([data-state="ready"]) .bar:hover, :host([data-state="ready"]) .bar:focus-within { opacity: 1; }
 .bar[hidden] { display: none; }
@@ -196,6 +202,8 @@ export const icons = {
   prev: svg('<path d="M15 5l-7 7 7 7"/>'),
   next: svg('<path d="M9 5l7 7-7 7"/>'),
   flow: svg('<path d="M3 8c3-3 6-3 9 0s6 3 9 0M3 15c3-3 6-3 9 0s6 3 9 0"/>'),
+  play: svg('<path d="M8 5v14l11-7z"/>'),
+  pause: svg('<path d="M8 5v14M16 5v14"/>'),
   label: svg('<circle cx="6" cy="17" r="1.6"/><path d="M7.2 15.8L12 11h8M14 15h6"/>'),
   section: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5v9" stroke-dasharray="2.5 2.2"/><path d="M12 12l8-4.5"/>'),
 }

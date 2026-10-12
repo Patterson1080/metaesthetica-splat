@@ -75,6 +75,19 @@ export class SectionFrameLayer {
     this.update()
   }
 
+  /** The boxes moved (an animation is playing): take their new places, keeping the same elements. */
+  refresh() {
+    const position = new Vec3()
+    const rotation = new Quat()
+    const size = new Vec3()
+    for (const { box, matrix } of this.items) {
+      position.set(box.position[0], box.position[1], box.position[2])
+      rotation.setFromEulerAngles(box.rotation[0], box.rotation[1], box.rotation[2])
+      size.set(box.size[0], box.size[1], box.size[2])
+      matrix.setTRS(position, rotation, size)
+    }
+  }
+
   private build(box: SectionBox, matrix: Mat4): Item {
     const root = document.createElement('div')
     root.className = 'sf-item'

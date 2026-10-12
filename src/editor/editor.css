@@ -29,6 +29,7 @@ html, body {
   grid-template:
     "top top top" 44px
     "rail view panel" minmax(0, 1fr)
+    "time time panel" auto
     "status status status" 28px
     / 46px minmax(0, 1fr) 312px;
   height: 100%;
@@ -262,6 +263,74 @@ pre {
   user-select: all;
 }
 
+/* ── timeline ─────────────────────────────────────────────────────────── */
+
+.timeline {
+  grid-area: time;
+  --tl-label: 220px;
+  --tl-pad: 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 196px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+body.timeline-closed .timeline { height: auto; }
+body.timeline-closed .tl-body { display: none; }
+
+.tl-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+.tl-bar .sep { width: 1px; height: 20px; margin: 0 4px; }
+.tl-bar button:has(> svg:only-child) { width: 30px; padding: 0; }
+.tl-bar button.record .icon { color: var(--muted); }
+.tl-bar button.record[aria-pressed="true"] { border-color: var(--danger); color: var(--danger); }
+.tl-bar button.record[aria-pressed="true"] .icon { color: var(--danger); }
+.tl-time, .tl-key { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.tl-time input { width: 62px; }
+.tl-key select:disabled, .tl-bar button:disabled { opacity: 0.4; }
+
+.tl-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--hover) transparent; }
+.tl-row { display: grid; grid-template-columns: var(--tl-label) minmax(0, 1fr); align-items: stretch; min-height: 24px; border-bottom: 1px solid var(--line); }
+.tl-head { position: sticky; top: 0; z-index: 2; background: var(--panel); min-height: 22px; }
+.tl-label { display: flex; align-items: center; gap: 2px; padding: 0 4px 0 10px; min-width: 0; border-right: 1px solid var(--line); font-size: 12px; }
+.tl-label > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-label button { flex: none; width: 22px; min-height: 22px; padding: 0; border-color: transparent; background: none; color: var(--muted); }
+.tl-label button:hover:not(:disabled) { color: var(--text); background: var(--hover); }
+.tl-label button svg { width: 13px; height: 13px; }
+
+/* a lane is inset so keys at the very start and end are not cut off; the playhead uses the same inset */
+.tl-lane { position: relative; margin: 0 var(--tl-pad); cursor: ew-resize; touch-action: none; }
+.tl-ruler { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.tl-tick { position: absolute; top: 0; bottom: 0; padding-left: 4px; border-left: 1px solid var(--line); line-height: 22px; pointer-events: none; }
+.tl-key-mark {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  min-height: 0;
+  margin: -5.5px 0 0 -5.5px;
+  padding: 0;
+  border: 1px solid var(--bg);
+  border-radius: 1px;
+  background: var(--text);
+  transform: rotate(45deg);
+  cursor: grab;
+}
+.tl-key-mark:hover:not(:disabled) { background: #fff; }
+.tl-key-mark.selected, .tl-key-mark.selected:hover { background: var(--accent); }
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tl-label) + var(--tl-pad) + (100% - var(--tl-label) - 2 * var(--tl-pad)) * var(--at, 0));
+  width: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 3;
+}
+.tl-playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4.5px solid transparent; border-top: 6px solid var(--accent); }
+.tl-empty { max-width: 70ch; padding: 12px; }
+
 /* ── status bar ───────────────────────────────────────────────────────── */
 
 .status {
@@ -303,11 +372,14 @@ dialog.preview header button { width: 30px; padding: 0; }
   #app {
     grid-template:
       "top top" 44px
-      "rail view" minmax(0, 1fr)
-      "panel panel" 38%
+      "rail view" minmax(160px, 1fr)
+      "time time" auto
+      "panel panel" 26%
       "status status" 28px
       / 46px minmax(0, 1fr);
   }
   .panel { border-left: none; border-top: 1px solid var(--line); }
+  /* the viewport comes first when there is little room */
+  .timeline { height: 132px; --tl-label: 150px; }
   .topbar .doc-name { display: none; }
 }

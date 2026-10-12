@@ -5,6 +5,7 @@ import { button, field, h, icons, number, section, setValue, trim } from './dom'
 import type { Editor, Tool, Transform } from './editor'
 import { download } from './ply-export'
 import { buildScenePanels } from './scene-panels'
+import { buildTimeline } from './timeline'
 
 const SAMPLE_URL = `${import.meta.env.BASE_URL}samples/knot.ply`
 
@@ -31,9 +32,10 @@ export function buildShell(root: HTMLElement) {
   const topbar = h('header', { class: 'topbar' })
   const rail = h('nav', { class: 'rail', attrs: { 'aria-label': 'Tools' } })
   const panel = h('aside', { class: 'panel' })
+  const timeline = h('section', { class: 'timeline', attrs: { 'aria-label': 'Timeline' } })
   const status = h('footer', { class: 'status' })
-  root.append(topbar, rail, viewport, panel, status)
-  return { canvas, overlay, empty, busy, viewport, topbar, rail, panel, status }
+  root.append(topbar, rail, viewport, panel, timeline, status)
+  return { canvas, overlay, empty, busy, viewport, topbar, rail, panel, timeline, status }
 }
 
 type Shell = ReturnType<typeof buildShell>
@@ -337,6 +339,7 @@ export function bindUi(shell: Shell, editor: Editor) {
   )
 
   const scenePanels = buildScenePanels(editor)
+  const timeline = buildTimeline(shell.timeline, editor)
   shell.panel.append(selectSection, transformSection, ...scenePanels.panels, cameraSection, playerSection, exportSection)
 
   // the callouts in the viewport are the player's own, so they need the player's styles
@@ -506,11 +509,38 @@ export function bindUi(shell: Shell, editor: Editor) {
     }
     if (e.altKey) return
 
+    // the timeline's keys, Blender-like: Space plays, K keys, Shift+K keys the camera
+    if (key === ' ') {
+      // a focused button would also take the Space as a click
+      if (e.target instanceof HTMLElement) e.target.blur()
+      editor.togglePlay()
+      e.preventDefault()
+      return
+    }
+    if (key === 'k') {
+      if (e.shiftKey) editor.keyCamera()
+      else editor.keySelected()
+      e.preventDefault()
+      return
+    }
+    if (key === 'home') {
+      editor.setTime(0)
+      e.preventDefault()
+      return
+    }
+    if (key === 't') {
+      document.body.classList.toggle('timeline-closed')
+      e.preventDefault()
+      return
+    }
+
     const tool = tools.find((t) => t.key.toLowerCase() === key)
     if (tool) editor.setTool(tool.id)
     else if (key === 'delete' || key === 'backspace') {
-      // splats first; with nothing selected, the Label tool's Delete removes the active label
-      if (editor.doc?.state.selected) editor.deleteSelected()
+      // a selected keyframe goes first, then splats; with neither, the Label tool's Delete removes the active label
+      if (timeline.deleteSelected()) {
+        // handled
+      } else if (editor.doc?.state.selected) editor.deleteSelected()
       else if (editor.tool === 'annotate' && editor.activeAnnotation !== null) editor.removeAnnotation(editor.activeAnnotation)
     } else if (key === 'escape') {
       // each press backs out of one thing: the selection, then the object being edited, then the tool

@@ -18,7 +18,7 @@ npm run dev        # http://localhost:5183
 | --- | --- |
 | `/` | the editor (`?load=<splat url>` or `?scene=<scene url>` opens a file directly) |
 | `/player.html?scene=samples/knot.scene.json` | the player full-window; also the `<iframe>` target |
-| `/demo.html` | the player embedded five ways in a long page: the reference for embedding |
+| `/demo.html` | the player embedded six ways in a long page: the reference for embedding |
 
 ```sh
 npm run build      # typecheck, then dist/ (the three pages) and dist-lib/ (the player library)
@@ -34,9 +34,10 @@ npm run sample     # regenerate the procedural sample splats in public/samples/
    - **Section boxes** hide part of the splat. Shown is what lies inside any *keep* box, minus what lies inside any *cut* box.
    - **Labels** are text callouts pinned to points on the splat.
    - **Forces** set the splat's own points flowing: swirl, wind, attract/repel, turbulence.
-5. **Stage.** Field of view, start view, saved viewpoints, zoom and pitch limits, auto-rotate, background. *Preview* runs the real player on the edited scene.
-6. **Export** the splat (`.ply`), the scene (`.scene.json`) and a poster (`.webp`).
-7. **Compress for the web** and point the scene at the result:
+5. **Animate** (optional). Keyframe the splat, the camera, forces and section boxes on the timeline.
+6. **Stage.** Field of view, start view, saved viewpoints, zoom and pitch limits, auto-rotate, background. *Preview* runs the real player on the edited scene.
+7. **Export** the splat (`.ply`), the scene (`.scene.json`) and a poster (`.webp`).
+8. **Compress for the web** and point the scene at the result:
 
    ```sh
    npx @playcanvas/splat-transform name.ply name.sog
@@ -78,6 +79,35 @@ The motion is computed in closed form on the GPU from a clock, with no per-splat
 
 Forces rest in the editor while a selection tool is in use, because selection works on splats where they rest.
 
+### Timeline
+
+The dock under the viewport works the way Blender's does: a playhead, one row per animated property, and keyframes you can drag.
+
+What can be keyed:
+
+| | Properties |
+| --- | --- |
+| Splat | position, rotation, scale |
+| Camera | position, target, field of view |
+| Force | position, rotation, reach, strength, share moving, point size, tint, wander, eddy size, lift, pull |
+| Section box | position, rotation, size |
+| Rest of the splat | opacity |
+
+Setting keys:
+
+- **`K`** keys everything about what you are editing at the playhead: the force or box you pressed **Edit** on, otherwise the splat.
+- **Key camera** (`Shift+K`) keys the current view. Move the playhead, orbit to the next view, key again: the camera travels between them on a smooth path.
+- **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed.
+- Each row has its own add-key button; double-clicking an empty stretch of a row adds a key there.
+
+Working with keys: drag a key to move it in time (it snaps to 0.05 s; hold Shift to place it freely), click one to select it and jump the playhead to it, then choose how it travels to the next key (**Smooth**, **Linear** or **Hold**) or press Delete. Drag the ruler to scrub. Everything on the timeline is undoable.
+
+As in Blender, an animated property shows its value at the playhead. If you change one without keying it, the change lasts until the playhead moves; the status bar says so when it happens.
+
+**Through camera** makes the viewport look through the animated camera. Turn it off to move around freely while the animation plays; the camera's path is then drawn in the viewport, with a cross at each key.
+
+The animation is saved in the scene file and the player plays it. A force's travel time cannot be keyed: every moving splat's place along its path is derived from it, so changing it mid-flight would make the whole flow jump.
+
 ### Editor shortcuts
 
 | Key | Action |
@@ -93,6 +123,10 @@ Forces rest in the editor while a selection tool is in use, because selection wo
 | `Esc` | back out: clear the selection, then stop editing a box or force, then return to navigate |
 | `Ctrl+Z` · `Ctrl+Shift+Z` | undo · redo |
 | `F` | frame the splat |
+| `Space` | play / pause the timeline |
+| `K` · `Shift+K` | key what is being edited · key the camera |
+| `Home` | playhead to the start |
+| `T` | fold the timeline away |
 
 ## Embedding the player
 
@@ -132,7 +166,7 @@ For the Metaesthetica website specifically, see [docs/WEBSITE-INTEGRATION.md](do
 - **Accessible.** Keyboard orbit and zoom, labelled controls, live status, labels as real text; no auto-rotate, animated moves or running forces under `prefers-reduced-motion` unless the visitor turns them on.
 - `destroy()` is safe mid-load and when called twice, so it works as a React effect cleanup, including StrictMode's double mount.
 
-Viewers get buttons for whatever the scene contains: saved viewpoints, labels on/off (`L`), the cut-away on/off (`C`), the flow on/off (`Space`), reset (`R`) and full screen (`F`).
+Viewers get buttons for whatever the scene contains: saved viewpoints, labels on/off (`L`), the cut-away on/off (`C`), the flow on/off, reset (`R`) and full screen (`F`). A scene with an animation also gets a play/pause button and a scrubber (`Space`); if the animation moves the camera, taking hold of the view pauses it and the play button hands the camera back.
 
 ### Options
 
@@ -148,12 +182,13 @@ Viewers get buttons for whatever the scene contains: saved viewpoints, labels on
 | `sections` | `true` | start with the scene's section boxes applied |
 | `annotations` | `true` | start with the scene's labels showing |
 | `forces` | `true`, `false` under reduced motion | start with the scene's forces running |
+| `autoplay` | scene's, `false` under reduced motion | start the scene's animation by itself |
 | `ui` | `true` | built-in controls |
 | `label` | scene name | accessible name of the 3D view |
 | `device` | `'webgpu'` for scenes with forces, else `'webgl2'` | WebGPU falls back to WebGL 2 |
 | `maxPixelRatio` | `2` | cap on device pixel ratio |
 
-Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSectionsEnabled(bool)`, `setAnnotationsVisible(bool)`, `setForcesEnabled(bool)`, `toggleFullscreen()`, `destroy()`, `on('load' | 'error' | 'progress' | 'pose' | 'state', fn)`. `player.loaded` is a promise for "on screen".
+Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSectionsEnabled(bool)`, `setAnnotationsVisible(bool)`, `setForcesEnabled(bool)`, `play()`, `pause()`, `seek(seconds)`, `toggleFullscreen()`, `destroy()`, `on('load' | 'error' | 'progress' | 'pose' | 'state', fn)`. `player.loaded` is a promise for "on screen".
 
 ### Theming
 
@@ -194,9 +229,18 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
       "amount": 1, "cycle": 7, "render": "points", "dotSize": 0.014, "tint": 0,
       "noise": 0.07, "noiseScale": 1.3, "lift": 0.14, "pull": 0
     }
-  ]
+  ],
+  "animation": {
+    "duration": 12, "loop": true, "autoplay": true,
+    "tracks": [
+      { "target": "camera.position", "keys": [{ "t": 0, "v": [3.2, 1.4, 3.2] }, { "t": 6, "v": [-3.4, 2.2, 2.4] }] },
+      { "target": "force.0.strength", "keys": [{ "t": 0, "v": 5 }, { "t": 6, "v": 70, "ease": "linear" }, { "t": 12, "v": 5 }] }
+    ]
+  }
 }
 ```
+
+A track's `target` is a path: `splat.position|rotation|scale`, `camera.position|target|fov`, `force.<n>.<property>`, `section.<n>.position|rotation|size`, or `rest.opacity`, where `<n>` counts from 0. A key's `ease` says how its value travels to the next key: `smooth` (the default, a curve through the keys), `linear` or `hold`.
 
 `src` and `poster` resolve relative to the scene file, so a scene and its assets can be moved as a folder. Positions are in world space. A label's `offset` is where its text sits relative to its point on screen, in CSS pixels. `sectionRest` says how the splats outside the boxes are shown; without it they are not drawn. Up to 8 section boxes and 4 forces are applied. Supported splat formats: `.ply`, `.compressed.ply`, `.sog`, and SOG `meta.json` / streamed `lod-meta.json`. Files served from another origin need CORS headers.
 
@@ -220,6 +264,8 @@ How it works: the engine copies every splat into a work buffer before drawing an
 - The splat's transform is stored in the scene file, not baked into the exported `.ply`.
 - Section boxes, labels and forces are placed in world space; they do not follow the splat if it is moved afterwards.
 - Forces are a display effect: they are not written into the exported `.ply`.
+- The timeline has no curve editor and no zoom: keys are edited as diamonds on a strip the length of the animation. Rotations are interpolated as Euler angles, so key them in steps of less than half a turn.
+- A force's own flow runs on a free clock, not on the timeline, so scrubbing moves forces, boxes and the camera but not the individual splats along their paths.
 - The player bundle is about 430 kB gzipped, nearly all of it engine. Import it dynamically so it never weighs on pages without a splat.
 - `public/samples/knot-clean.sog` was made with `splat-transform` from `knot-clean.ply`; regenerate it if you change the sample script.
 - `.spz` is not wired up (the engine's parser needs a separate zstd wasm module).

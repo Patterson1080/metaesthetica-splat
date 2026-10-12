@@ -11,7 +11,7 @@ const note = (text: string) => {
   log.textContent = lines.slice(-8).join('\n')
 }
 
-for (const id of ['hero', 'tile', 'infographic', 'flow']) {
+for (const id of ['hero', 'tile', 'infographic', 'flow', 'animated']) {
   const element = document.getElementById(id)!
   element.addEventListener('splat-load', () => note(`#${id} loaded`))
   element.addEventListener('splat-error', (e) => note(`#${id} failed: ${(e as CustomEvent<Error>).detail.message}`))

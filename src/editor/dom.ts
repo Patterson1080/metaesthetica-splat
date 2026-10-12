@@ -77,4 +77,8 @@ export const icons = {
   play: svgIcon('<path d="M7 4.5v15l12-7.5z"/>'),
   close: svgIcon('<path d="M6 6l12 12M18 6L6 18"/>'),
   label: svgIcon('<circle cx="6" cy="17" r="1.6"/><path d="M7.2 15.8L12 11h8M14 15h6"/>'),
+  pause: svgIcon('<path d="M8 5v14M16 5v14"/>'),
+  toStart: svgIcon('<path d="M6 5v14"/><path d="M19 5l-9 7 9 7z"/>'),
+  record: svgIcon('<circle cx="12" cy="12" r="5" fill="currentColor"/>'),
+  diamond: svgIcon('<path d="M12 5l7 7-7 7-7-7z"/>'),
 }

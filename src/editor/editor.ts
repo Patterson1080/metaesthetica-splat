@@ -10,6 +10,7 @@ import {
   type GSplatData,
   type TransformGizmo,
 } from 'playcanvas'
+import { ANIMATABLE, dropTracksFor, evaluate, insertKey, parseTarget, readSceneValue, sampleTrack, targetOf, writeSceneValue, type AnimValue, type TargetRef } from '../core/animation'
 import { AnnotationLayer } from '../core/annotations'
 import { SectionFrameLayer } from '../core/section-frames'
 import { SplatEffects } from '../core/effects'
@@ -17,6 +18,7 @@ import { Emitter } from '../core/events'
 import {
   DEFAULT_ANNOTATION_OFFSET,
   DEFAULT_BACKGROUND,
+  DEFAULT_DURATION,
   DEFAULT_FOV,
   DEFAULT_REST_OPACITY,
   DEFAULT_ROTATION,
@@ -24,11 +26,13 @@ import {
   MAX_FORCES,
   MAX_SECTIONS,
   restOpacity,
+  type Animation,
   type Annotation,
   type CameraPose,
   type ControlLimits,
   type Force,
   type ForceType,
+  type Keyframe,
   type SectionBox,
   type SectionRest,
   type SplatScene,
@@ -67,6 +71,7 @@ export interface SceneSettings {
   sectionRest: SectionRest
   annotations: Annotation[]
   forces: Force[]
+  animation: Animation
 }
 
 const defaultSettings = (): SceneSettings => ({
@@ -80,6 +85,7 @@ const defaultSettings = (): SceneSettings => ({
   sectionRest: { opacity: DEFAULT_REST_OPACITY, hidden: false },
   annotations: [],
   forces: [],
+  animation: { duration: DEFAULT_DURATION, loop: true, tracks: [] },
 })
 
 /** The splat being edited. */
@@ -108,6 +114,10 @@ type EditorEvents = {
   settings: []
   /** Section boxes, forces or callouts changed, or a different one became active */
   scene: []
+  /** Keyframes, tracks or the timeline's switches changed */
+  animation: []
+  /** The playhead moved, or playback started or stopped */
+  time: []
   tool: [tool: Tool]
   history: []
   /** A long task started (message) or finished (null) */
@@ -122,11 +132,20 @@ const PICK_RADIUS = 7 // CSS pixels around the pointer searched for a splat to p
 const CLICK_SLOP = 4
 const MIN_SCALE = 1e-3
 
+const PROP_LABELS: Record<string, string> = {
+  position: 'Position', rotation: 'Rotation', scale: 'Scale', size: 'Size', target: 'Target', fov: 'Field of view',
+  radius: 'Reach', strength: 'Strength', amount: 'Share moving', dotSize: 'Point size', tint: 'Tint',
+  noise: 'Wander', noiseScale: 'Eddy size', lift: 'Lift', pull: 'Pull in', opacity: 'Opacity',
+}
+
 const stem = (filename: string) => filename.replace(/\.(compressed\.ply|ply|sog|json)$/i, '')
 const round = (n: number, digits = 3) => Math.round(n * 10 ** digits) / 10 ** digits
 
 const SECTION_COLOR = { keep: [0.35, 0.85, 1], cut: [1, 0.5, 0.3] }
 const FORCE_COLOR = [0.85, 0.5, 1]
+const CAMERA_COLOR = [1, 0.78, 0.1]
+const PATH_STEPS = 96
+const KEY_MARK = 0.05
 
 // the 12 edges of a unit cube, as index pairs into its 8 corners
 const BOX_CORNERS = [-0.5, 0.5].flatMap((x) => [-0.5, 0.5].flatMap((y) => [-0.5, 0.5].map((z) => new Vec3(x, y, z))))
@@ -153,6 +172,13 @@ export class Editor {
   activeAnnotation: number | null = null
   /** Run the scene's forces in the viewport. They rest while a selection tool is in use. */
   flowPreview = true
+  /** The playhead, in seconds */
+  time = 0
+  playing = false
+  /** Write a key whenever an animatable property is changed */
+  autoKey = false
+  /** Look through the animated camera; off leaves the viewport free and draws the camera's path */
+  followCamera = true
 
   private readonly gizmos: Record<(typeof GIZMO_TOOLS)[number], TransformGizmo>
   private gizmoStart: Transform | null = null
@@ -248,6 +274,7 @@ export class Editor {
     })
 
     viewer.events.on('update', (dt) => {
+      if (this.playing) this.stepPlayback(dt)
       if (this.doc?.effects.advance(dt)) viewer.requestRender()
       this.callouts.update()
       this.frames.update()
@@ -298,8 +325,11 @@ export class Editor {
       if (this.settings.initial) this.viewer.controls.setPose(this.settings.initial)
       else this.viewer.frameScene()
 
+      this.time = 0
+      this.playing = false
       this.applyTool()
       this.syncScene()
+      this.applyTime()
       this.events.emit('doc')
       this.events.emit('settings')
       this.events.emit('selection')
@@ -342,6 +372,7 @@ export class Editor {
     s.sectionRest = scene.sectionRest ? { ...scene.sectionRest } : { opacity: DEFAULT_REST_OPACITY, hidden: true }
     s.annotations = copy(scene.annotations)
     s.forces = copy(scene.forces)
+    if (scene.animation) s.animation = JSON.parse(JSON.stringify(scene.animation))
   }
 
   // ── tools ────────────────────────────────────────────────────────────────
@@ -642,11 +673,32 @@ export class Editor {
   private recordTransform(before: Transform, after: Transform) {
     if (JSON.stringify(before) === JSON.stringify(after)) return
     const entity = this.doc!.splat.entity
+    // with auto-key on, the key this change writes is part of the same undo step
+    const tracksBefore = JSON.stringify(this.animation.tracks)
+    if (this.autoKey && !this.playing) {
+      for (const prop of ANIMATABLE.splat) {
+        if (JSON.stringify(before[prop]) !== JSON.stringify(after[prop])) insertKey(this.animation, targetOf('splat', prop), this.time, after[prop])
+      }
+    } else if (ANIMATABLE.splat.some((prop) => JSON.stringify(before[prop]) !== JSON.stringify(after[prop]) && this.isAnimated(targetOf('splat', prop)))) {
+      this.warnUnkeyed()
+    }
+    const tracksAfter = JSON.stringify(this.animation.tracks)
+    const setTracks = (json: string) => {
+      this.animation.tracks = JSON.parse(json)
+      this.events.emit('animation')
+    }
     this.history.push({
       label: 'Transform',
-      undo: () => this.applyTransform(entity, before),
-      redo: () => this.applyTransform(entity, after),
+      undo: () => {
+        setTracks(tracksBefore)
+        this.applyTransform(entity, before)
+      },
+      redo: () => {
+        setTracks(tracksAfter)
+        this.applyTransform(entity, after)
+      },
     })
+    if (tracksAfter !== tracksBefore) this.events.emit('animation')
   }
 
   // ── scene settings ───────────────────────────────────────────────────────
@@ -694,13 +746,23 @@ export class Editor {
   // ── scene objects: undo and syncing ──────────────────────────────────────
 
   private snapshotScene() {
-    const { sections, sectionRest, annotations, forces } = this.settings
-    return JSON.stringify({ sections, sectionRest, annotations, forces })
+    const { sections, sectionRest, annotations, forces, animation } = this.settings
+    return JSON.stringify({ sections, sectionRest, annotations, forces, animation })
   }
 
   private restoreScene(snapshot: string) {
     Object.assign(this.settings, JSON.parse(snapshot))
     this.syncScene()
+    // the snapshot holds values from wherever the playhead was then; put them where it is now
+    this.applyTime()
+  }
+
+  private isAnimated(target: string) {
+    return this.animation.tracks.some((track) => track.target === target)
+  }
+
+  private warnUnkeyed() {
+    this.events.emit('notice', 'That property is animated: the change lasts until the playhead moves. Press K or turn on Auto-key to keep it.')
   }
 
   /** Change section boxes, forces or callouts as one undo step. */
@@ -711,9 +773,16 @@ export class Editor {
   }
 
   private commitScene(label: string, before: string) {
+    if (!this.playing) {
+      const changed = this.changedTargets(before)
+      if (this.autoKey) for (const { target, value } of changed) insertKey(this.animation, target, this.time, value)
+      else if (changed.some(({ target }) => this.isAnimated(target))) this.warnUnkeyed()
+    }
     const after = this.snapshotScene()
     this.syncScene()
     if (after === before) return
+    // keys were added, moved or removed: what they animate may now sit somewhere else
+    if (JSON.stringify(JSON.parse(before).animation) !== JSON.stringify(this.animation)) this.applyTime()
     this.history.push({ label, undo: () => this.restoreScene(before), redo: () => this.restoreScene(after) })
   }
 
@@ -741,16 +810,7 @@ export class Editor {
     }
     fit(this.sectionNodes, sections.length, 'section')
     fit(this.forceNodes, forces.length, 'force')
-    sections.forEach((s, i) => {
-      this.sectionNodes[i].setLocalPosition(...s.position)
-      this.sectionNodes[i].setLocalEulerAngles(...s.rotation)
-      this.sectionNodes[i].setLocalScale(...s.size)
-    })
-    forces.forEach((f, i) => {
-      this.forceNodes[i].setLocalPosition(...f.position)
-      this.forceNodes[i].setLocalEulerAngles(...(f.rotation ?? [0, 0, 0]))
-      this.forceNodes[i].setLocalScale(f.radius, f.radius, f.radius)
-    })
+    this.placeNodes()
 
     const list = this.active ? (this.active.kind === 'section' ? sections : forces) : null
     if (this.active && this.active.index >= list!.length) this.active = null
@@ -762,6 +822,26 @@ export class Editor {
     this.attachGizmo()
     this.viewer.requestRender(3)
     this.events.emit('scene')
+    this.events.emit('animation')
+  }
+
+  /** Put the helper nodes (what the gizmo holds and the wireframes follow) where the scene data says. */
+  private placeNodes() {
+    const { sections, forces } = this.settings
+    sections.forEach((s, i) => {
+      const node = this.sectionNodes[i]
+      if (!node) return
+      node.setLocalPosition(...s.position)
+      node.setLocalEulerAngles(...s.rotation)
+      node.setLocalScale(...s.size)
+    })
+    forces.forEach((f, i) => {
+      const node = this.forceNodes[i]
+      if (!node) return
+      node.setLocalPosition(...f.position)
+      node.setLocalEulerAngles(...(f.rotation ?? [0, 0, 0]))
+      node.setLocalScale(f.radius, f.radius, f.radius)
+    })
   }
 
   private applySections() {
@@ -840,6 +920,268 @@ export class Editor {
     this.events.emit('scene')
   }
 
+  // ── animation ────────────────────────────────────────────────────────────
+
+  get animation() {
+    return this.settings.animation
+  }
+
+  /** Move the playhead and put everything animated where it is at that time. */
+  setTime(t: number) {
+    this.time = Math.min(Math.max(round(t), 0), this.animation.duration)
+    this.applyTime()
+    this.events.emit('time')
+  }
+
+  play() {
+    if (!this.doc || this.playing) return
+    // pressing play at the end starts over, as it does everywhere
+    if (this.time >= this.animation.duration - 1e-3) this.time = 0
+    this.playing = true
+    this.events.emit('time')
+  }
+
+  pause() {
+    if (!this.playing) return
+    this.playing = false
+    this.time = round(this.time)
+    this.afterPlayback()
+  }
+
+  togglePlay() {
+    if (this.playing) this.pause()
+    else this.play()
+  }
+
+  private stepPlayback(dt: number) {
+    const { duration, loop } = this.animation
+    let t = this.time + dt
+    if (t >= duration) {
+      if (loop !== false) t %= duration
+      else {
+        t = duration
+        this.playing = false
+      }
+    }
+    this.time = t
+    this.applyTime()
+    this.events.emit('time')
+    if (!this.playing) this.afterPlayback()
+  }
+
+  /** Playback only moves things; the panels and helpers that follow them catch up when it stops. */
+  private afterPlayback() {
+    this.applyTime()
+    this.applySections()
+    this.attachGizmo()
+    this.events.emit('time')
+    this.events.emit('scene')
+    this.events.emit('transform')
+  }
+
+  /** Sample every track at the playhead and write the values into the scene. */
+  private applyTime() {
+    const doc = this.doc
+    if (!doc) return
+    const entity = doc.splat.entity
+    const camera: { position?: number[]; target?: number[]; fov?: number } = {}
+    let sceneChanged = false
+    let splatChanged = false
+
+    evaluate(this.animation, this.time, (ref, value) => {
+      if (ref.kind === 'splat') {
+        if (typeof value === 'number') return
+        if (ref.prop === 'position') entity.setLocalPosition(value[0], value[1], value[2])
+        else if (ref.prop === 'rotation') entity.setLocalEulerAngles(value[0], value[1], value[2])
+        else entity.setLocalScale(Math.max(value[0], MIN_SCALE), Math.max(value[1], MIN_SCALE), Math.max(value[2], MIN_SCALE))
+        splatChanged = true
+      } else if (ref.kind === 'camera') {
+        if (ref.prop === 'fov') {
+          if (typeof value === 'number') camera.fov = value
+        } else if (typeof value !== 'number') camera[ref.prop as 'position' | 'target'] = value
+      } else if (writeSceneValue(this.settings, ref, value)) {
+        sceneChanged = true
+      }
+    })
+
+    if (sceneChanged) {
+      this.placeNodes()
+      if (this.playing) {
+        // the light path: uniforms and box frames only, sixty times a second
+        doc.effects.setSections(this.settings.sections, restOpacity(this.settings.sectionRest))
+        this.frames.refresh()
+      } else {
+        this.applySections()
+      }
+      this.applyForces()
+    }
+
+    // the viewport looks through the animated camera only when asked to; otherwise it stays free
+    if (this.followCamera && (camera.position || camera.target || camera.fov !== undefined)) {
+      const pose = this.viewer.controls.getPose()
+      this.viewer.controls.setPose({
+        position: (camera.position as Vec3Tuple | undefined) ?? pose.position,
+        target: (camera.target as Vec3Tuple | undefined) ?? pose.target,
+      })
+      if (camera.fov !== undefined) {
+        this.settings.fov = camera.fov
+        this.viewer.setFov(camera.fov)
+      }
+    }
+
+    if (!this.playing) {
+      if (splatChanged) {
+        this.attachGizmo()
+        this.events.emit('transform')
+      }
+      if (sceneChanged) this.events.emit('scene')
+    }
+    this.viewer.requestRender(2)
+  }
+
+  /** What a target is right now, for writing a key from it. */
+  private valueOf(ref: TargetRef): AnimValue | null {
+    if (ref.kind === 'splat') {
+      const t = this.getTransform()
+      return t ? [...t[ref.prop as keyof Transform]] : null
+    }
+    if (ref.kind === 'camera') {
+      if (ref.prop === 'fov') return this.viewer.fov
+      return [...this.viewer.controls.getPose()[ref.prop as 'position' | 'target']]
+    }
+    return readSceneValue(this.settings, ref)
+  }
+
+  private keyTargets(label: string, targets: string[]) {
+    if (!this.doc) return
+    this.editScene(label, () => {
+      for (const target of targets) {
+        const ref = parseTarget(target)
+        const value = ref ? this.valueOf(ref) : null
+        if (value !== null) insertKey(this.animation, target, this.time, value)
+      }
+    })
+  }
+
+  /** Key everything about what is being edited: the active force or box, otherwise the splat. */
+  keySelected() {
+    const { active } = this
+    const kind = active?.kind ?? 'splat'
+    const name = active ? (active.kind === 'force' ? this.settings.forces : this.settings.sections)[active.index]?.name || kind : 'the splat'
+    this.keyTargets('Add keys', ANIMATABLE[kind].map((prop) => targetOf(kind, prop, active?.index)))
+    this.events.emit('notice', `Keyed ${name} at ${this.time.toFixed(2)} s`)
+  }
+
+  /** Key the view: where the viewport camera is now becomes where the animated camera is at this time. */
+  keyCamera() {
+    this.keyTargets('Key camera', ANIMATABLE.camera.map((prop) => targetOf('camera', prop)))
+    this.events.emit('notice', `Keyed the camera at ${this.time.toFixed(2)} s`)
+  }
+
+  /** Add a key to one track at the playhead, with the value it has there. */
+  keyTrack(target: string) {
+    this.keyTargets('Add key', [target])
+  }
+
+  /** A key is about to be dragged along its track: the whole drag is one undo step. */
+  beginKeyEdit() {
+    this.beginSceneEdit()
+  }
+
+  moveKey(target: string, key: Keyframe, t: number) {
+    const track = this.animation.tracks.find((candidate) => candidate.target === target)
+    if (!track) return
+    key.t = Math.min(Math.max(round(t), 0), this.animation.duration)
+    track.keys.sort((a, b) => a.t - b.t)
+    this.applyTime()
+  }
+
+  endKeyEdit() {
+    this.endSceneEdit('Move key')
+  }
+
+  removeKey(target: string, key: Keyframe) {
+    this.editScene('Delete key', () => {
+      const track = this.animation.tracks.find((candidate) => candidate.target === target)
+      if (!track) return
+      track.keys = track.keys.filter((candidate) => candidate !== key)
+      if (track.keys.length === 0) this.animation.tracks = this.animation.tracks.filter((candidate) => candidate !== track)
+    })
+  }
+
+  setKeyEase(key: Keyframe, ease: NonNullable<Keyframe['ease']>) {
+    this.editScene('Change key easing', () => {
+      if (ease === 'smooth') delete key.ease
+      else key.ease = ease
+    })
+  }
+
+  removeTrack(target: string) {
+    this.editScene('Remove animation track', () => {
+      this.animation.tracks = this.animation.tracks.filter((track) => track.target !== target)
+    })
+  }
+
+  setDuration(seconds: number) {
+    this.editScene('Change animation length', () => {
+      this.animation.duration = Math.max(round(seconds, 2), 0.5)
+    })
+    if (this.time > this.animation.duration) this.setTime(this.animation.duration)
+  }
+
+  setLoop(loop: boolean) {
+    this.editScene('Change looping', () => {
+      this.animation.loop = loop
+    })
+  }
+
+  /** While on, changing an animatable property writes a key at the playhead, as Blender's record button does. */
+  setAutoKey(on: boolean) {
+    this.autoKey = on
+    this.events.emit('animation')
+  }
+
+  setFollowCamera(on: boolean) {
+    this.followCamera = on
+    this.applyTime()
+    this.events.emit('animation')
+  }
+
+  /** A readable name for a track: "Updraft swirl · Strength". */
+  trackLabel(target: string): string {
+    const ref = parseTarget(target)
+    if (!ref) return target
+    const prop = PROP_LABELS[ref.prop] ?? ref.prop
+    if (ref.kind === 'splat') return `Splat · ${prop}`
+    if (ref.kind === 'camera') return `Camera · ${prop}`
+    if (ref.kind === 'rest') return 'Rest of the splat · Opacity'
+    const item = (ref.kind === 'force' ? this.settings.forces : this.settings.sections)[ref.index]
+    return `${item?.name || (ref.kind === 'force' ? 'Force' : 'Box')} · ${prop}`
+  }
+
+  /** The animatable properties that differ between an earlier snapshot of the scene and now. */
+  private changedTargets(before: string): { target: string; value: AnimValue }[] {
+    const was = JSON.parse(before) as Pick<SceneSettings, 'sections' | 'sectionRest' | 'forces'>
+    const now = this.settings
+    const changed: { target: string; value: AnimValue }[] = []
+    const compare = (kind: 'force' | 'section', a: object[], b: object[]) => {
+      // adding or removing one is not a change to any of them
+      if (a.length !== b.length) return
+      b.forEach((item, i) => {
+        for (const prop of ANIMATABLE[kind]) {
+          const value = (item as Record<string, AnimValue | undefined>)[prop]
+          if (value !== undefined && JSON.stringify((a[i] as Record<string, unknown>)[prop]) !== JSON.stringify(value)) {
+            changed.push({ target: targetOf(kind, prop, i), value })
+          }
+        }
+      })
+    }
+    compare('force', was.forces, now.forces)
+    compare('section', was.sections, now.sections)
+    if (was.sectionRest.opacity !== now.sectionRest.opacity) changed.push({ target: 'rest.opacity', value: now.sectionRest.opacity })
+    return changed
+  }
+
   // ── section boxes ────────────────────────────────────────────────────────
 
   addSection(mode: 'keep' | 'cut' = 'keep') {
@@ -878,6 +1220,7 @@ export class Editor {
   removeSection(index: number) {
     this.editScene('Remove section box', () => {
       this.settings.sections.splice(index, 1)
+      dropTracksFor(this.animation, 'section', index)
       if (this.active?.kind === 'section') this.active = null
     })
   }
@@ -938,6 +1281,7 @@ export class Editor {
   removeForce(index: number) {
     this.editScene('Remove force', () => {
       this.settings.forces.splice(index, 1)
+      dropTracksFor(this.animation, 'force', index)
       if (this.active?.kind === 'force') this.active = null
     })
   }
@@ -1009,6 +1353,7 @@ export class Editor {
     }
     if (s.annotations.length) scene.annotations = copy(s.annotations)
     if (s.forces.length) scene.forces = copy(s.forces)
+    if (s.animation.tracks.length) scene.animation = JSON.parse(JSON.stringify(s.animation))
     return scene
   }
 
@@ -1082,7 +1427,6 @@ export class Editor {
     }
 
     const { sections, forces } = this.settings
-    if (sections.length === 0 && forces.length === 0) return
     const positions: number[] = []
     const colors: number[] = []
     const segment = (a: Vec3, b: Vec3, color: number[], alpha: number) => {
@@ -1126,6 +1470,30 @@ export class Editor {
         segment(new Vec3().copy(center).sub(b.copy(up).mulScalar(force.radius)), new Vec3().copy(center).add(b.copy(up).mulScalar(force.radius * 1.25)), FORCE_COLOR, alpha)
       }
     })
+    // the animated camera's path, when the viewport is not riding along it
+    const path = this.followCamera ? undefined : this.animation.tracks.find((track) => track.target === 'camera.position')
+    if (path && path.keys.length > 1) {
+      const from = path.keys[0].t
+      const to = path.keys[path.keys.length - 1].t
+      const at = (t: number) => {
+        const v = sampleTrack(path, t) as number[]
+        return new Vec3(v[0], v[1], v[2])
+      }
+      let previous = at(from)
+      for (let s = 1; s <= PATH_STEPS; s++) {
+        const next = at(from + ((to - from) * s) / PATH_STEPS)
+        segment(previous, next, CAMERA_COLOR, 0.9)
+        previous = next
+      }
+      // a small cross at every key
+      for (const key of path.keys) {
+        const p = key.v as number[]
+        for (const axis of [Vec3.RIGHT, Vec3.UP, Vec3.BACK]) {
+          segment(new Vec3(p[0], p[1], p[2]).sub(b.copy(axis).mulScalar(KEY_MARK)), new Vec3(p[0], p[1], p[2]).add(b.copy(axis).mulScalar(KEY_MARK)), CAMERA_COLOR, 1)
+        }
+      }
+    }
+    if (positions.length === 0) return
     // drawn over the splat: a box buried inside it would otherwise be impossible to find
     app.drawLineArrays(positions, colors, false)
   }
