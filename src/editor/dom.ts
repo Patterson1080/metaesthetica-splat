@@ -29,8 +29,79 @@ export const setValue = (input: HTMLInputElement, value: string) => {
 
 export const trim = (n: number, digits = 3) => String(Math.round(n * 10 ** digits) / 10 ** digits)
 
-export function section(title: string, ...children: (Node | string)[]) {
-  return h('section', {}, h('h2', {}, title), ...children)
+const STORE_KEY = 'splat-editor-ui'
+
+function store(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+/** A remembered interface choice (which tab, which groups are folded), or `fallback`. */
+export function recall<T>(key: string, fallback: T): T {
+  const value = store()[key]
+  return (typeof value === typeof fallback ? value : fallback) as T
+}
+
+export function remember(key: string, value: unknown) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ ...store(), [key]: value }))
+  } catch {
+    // storage blocked: the choice still holds until the page reloads
+  }
+}
+
+export interface GroupOptions {
+  /** A sentence or two of explanation, kept behind a "?" so the group shows controls, not prose */
+  help?: string
+  /** Start folded. Whatever the user last chose wins over this. */
+  closed?: boolean
+  /** Key for remembering the folded state; defaults to the title */
+  id?: string
+}
+
+/**
+ * A collapsible group of related properties, like a panel in Blender's Properties editor.
+ * It remembers whether it was left open.
+ */
+export function group(title: string, options: GroupOptions, ...children: Child[]) {
+  const key = `group:${options.id ?? title}`
+  const body = h('div', { class: 'group-body' }, ...children)
+  const toggle = h('button', { type: 'button', class: 'group-toggle' })
+  toggle.innerHTML = icons.chevron
+  toggle.append(h('span', {}, title))
+  const node = h('section', { class: 'group' })
+
+  const setOpen = (open: boolean) => {
+    node.classList.toggle('closed', !open)
+    toggle.setAttribute('aria-expanded', String(open))
+    body.hidden = !open
+  }
+  toggle.addEventListener('click', () => {
+    const open = node.classList.contains('closed')
+    setOpen(open)
+    remember(key, open)
+  })
+
+  const head = h('header', { class: 'group-head' }, toggle)
+  node.append(head)
+  if (options.help) {
+    const help = h('p', { class: 'group-help', hidden: true }, options.help)
+    const about = h('button', { type: 'button', class: 'group-about', title: 'What is this?', attrs: { 'aria-expanded': 'false', 'aria-label': `About ${title}` } }, '?')
+    about.addEventListener('click', () => {
+      help.hidden = !help.hidden
+      about.setAttribute('aria-expanded', String(!help.hidden))
+      // an explanation asked for should not be hidden by a folded group
+      if (!help.hidden) setOpen(true)
+    })
+    head.append(about)
+    node.append(help)
+  }
+  node.append(body)
+  setOpen(recall(key, !options.closed))
+  return node
 }
 
 export function field(label: string, ...controls: Node[]) {
@@ -81,4 +152,13 @@ export const icons = {
   toStart: svgIcon('<path d="M6 5v14"/><path d="M19 5l-9 7 9 7z"/>'),
   record: svgIcon('<circle cx="12" cy="12" r="5" fill="currentColor"/>'),
   diamond: svgIcon('<path d="M12 5l7 7-7 7-7-7z"/>'),
+  chevron: svgIcon('<path d="M9 6l6 6-6 6"/>'),
+  // the properties tabs
+  tabEdit: svgIcon('<ellipse cx="12" cy="9.5" rx="8" ry="5.5" stroke-dasharray="3 2.5"/><path d="M8 14.5c-1.5 1-1.5 3 .5 3.5s2 2-.5 3"/>'),
+  tabSplat: svgIcon('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
+  tabBoxes: svgIcon('<rect x="3.5" y="3.5" width="17" height="17" stroke-dasharray="3 2.5"/><rect x="8.5" y="8.5" width="7" height="7"/>'),
+  tabForces: svgIcon('<path d="M3 8c3-3 6-3 9 0s6 3 9 0M3 15c3-3 6-3 9 0s6 3 9 0"/>'),
+  tabCamera: svgIcon('<rect x="3" y="7" width="13" height="10" rx="1.5"/><path d="M16 10.5l5-2.5v8l-5-2.5z"/>'),
+  tabPlayer: svgIcon('<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M10 9.5v5l4.5-2.5z"/>'),
+  tabExport: svgIcon('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>'),
 }

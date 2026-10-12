@@ -1,10 +1,11 @@
 import { annotationCss } from '../core/annotations'
 import { parseScene, type SplatScene, type Vec3Tuple } from '../core/scene'
 import { SplatPlayer } from '../player/index'
-import { button, field, h, icons, number, section, setValue, trim } from './dom'
+import { button, field, group, h, icons, number, setValue, trim } from './dom'
 import type { Editor, Tool, Transform } from './editor'
 import { download } from './ply-export'
 import { buildScenePanels } from './scene-panels'
+import { buildTabs } from './tabs'
 import { buildTimeline } from './timeline'
 
 const SAMPLE_URL = `${import.meta.env.BASE_URL}samples/knot.ply`
@@ -188,16 +189,19 @@ export function bindUi(shell: Shell, editor: Editor) {
   radius.value = '2'
   const radiusButton = button('Select', () => editor.selectOutside(Number(radius.value) || 0))
 
-  const selectSection = section(
+  const selectionGroup = group(
     'Selection',
+    { help: 'Select with the rectangle, lasso or brush tools on the left. Shift adds to the selection, Ctrl removes from it.' },
     stats,
     h('div', { class: 'row' }, selectionButtons.all, selectionButtons.none, selectionButtons.invert),
     h('div', { class: 'row' }, selectionButtons.remove, selectionButtons.keep),
     field('Brush size', brushSize),
-    h('h3', {}, 'Clean-up'),
+  )
+  const cleanupGroup = group(
+    'Clean-up',
+    { help: 'These select; review the highlight, then press Delete. The radius is measured from the point the camera orbits.' },
     field('Faint splats', faint, faintValue, faintButton),
     field('Beyond radius', radius, radiusButton),
-    h('p', { class: 'fine' }, 'Clean-up selects; review the highlight, then press Delete. The radius is measured from the point the camera orbits.'),
   )
 
   // ── panel: transform ─────────────────────────────────────────────────────
@@ -219,8 +223,9 @@ export function bindUi(shell: Shell, editor: Editor) {
     transformInputs[key] = inputs
     return field(label, ...inputs)
   }
-  const transformSection = section(
+  const transformGroup = group(
     'Transform',
+    { help: 'Where the splat sits in the scene. Captures usually arrive upside down; Flip upright turns one the right way. Tools 1, 2 and 3 do the same by hand.' },
     transformRow('position', 'Position', 0.1),
     transformRow('rotation', 'Rotation', 5),
     transformRow('scale', 'Scale', 0.1),
@@ -242,13 +247,16 @@ export function bindUi(shell: Shell, editor: Editor) {
   const startGo = button('Go', () => editor.settings.initial && editor.goToPose(editor.settings.initial))
   const startClear = button('Clear', () => editor.updateSettings({ initial: null }))
   const poseList = h('ul', { class: 'poses' })
-  const cameraSection = section(
-    'Camera & views',
-    field('Field of view', fov, fovValue),
-    h('h3', {}, 'Start view'),
+  const lensGroup = group('Lens', {}, field('Field of view', fov, fovValue))
+  const startGroup = group(
+    'Start view',
+    { help: 'The view the player opens on, and returns to on reset.' },
     h('div', { class: 'row' }, button('Set from camera', () => editor.setInitialFromCamera()), startGo, startClear),
     startState,
-    h('h3', {}, 'Saved views'),
+  )
+  const viewsGroup = group(
+    'Saved views',
+    { help: 'Named viewpoints. Viewers step through them with the arrows in the player. For a camera that moves on its own, key it on the timeline instead.' },
     poseList,
     h('div', { class: 'row' }, button('+ Add current view', () => editor.addPose())),
   )
@@ -274,17 +282,21 @@ export function bindUi(shell: Shell, editor: Editor) {
   grid.addEventListener('change', () => editor.setGrid(grid.checked))
   const useDistance = (key: 'minDistance' | 'maxDistance') =>
     button('Use current', () => editor.updateSettings({ controls: { [key]: Number(trim(viewer.controls.distance, 2)) } }), { title: 'Use the camera’s current distance' })
-  const playerSection = section(
-    'Player',
+  const stageGroup = group(
+    'Stage',
+    { help: 'What is behind the splat in the player. Transparent lets the page show through.' },
     field('Background', background, h('label', { class: 'check' }, transparent, 'Transparent')),
-    field('Auto-rotate °/s', limits.autoRotate),
+  )
+  const orbitGroup = group(
+    'Orbit limits',
+    { help: 'How far viewers may zoom and tilt in the player. They do not bind the editor’s own camera.' },
     field('Nearest', limits.minDistance, useDistance('minDistance')),
     field('Farthest', limits.maxDistance, useDistance('maxDistance')),
     field('Pitch range', limits.minPitch, limits.maxPitch),
     h('label', { class: 'check' }, pan, 'Viewers may pan'),
-    h('h3', {}, 'Editor viewport'),
-    h('label', { class: 'check' }, grid, 'Show grid'),
   )
+  const idleGroup = group('Idle motion', { help: 'A slow turn around the splat while nobody is touching it. 0 is off.' }, field('Auto-rotate °/s', limits.autoRotate))
+  const viewportGroup = group('Viewport', { closed: true }, h('label', { class: 'check' }, grid, 'Show grid'))
 
   // ── panel: export ────────────────────────────────────────────────────────
 
@@ -360,10 +372,11 @@ export function bindUi(shell: Shell, editor: Editor) {
     })
   }, { class: 'primary', title: 'Render the timeline from start to end as an H.264 .mp4' })
 
-  const exportSection = section(
-    'Export',
+  const filesGroup = group(
+    'Files',
+    { help: 'The splat without what you deleted, the scene file the player reads (camera, boxes, labels, forces, animation), and a still of the current view to show before the splat loads.' },
     field('Name', exportName),
-    field('Splat URL in scene', splatUrl),
+    field('Splat URL', splatUrl),
     h('label', { class: 'check' }, posterRef, 'Scene references the poster'),
     h('div', { class: 'column' },
       button('Download splat (.ply)', () => run(async () => {
@@ -380,19 +393,39 @@ export function bindUi(shell: Shell, editor: Editor) {
         notice(`Exported ${baseName()}.webp from the current view`)
       })),
     ),
-    h('p', { class: 'fine' }, 'For the web, compress the .ply to .sog (about 15–20× smaller), then point “Splat URL in scene” at it:'),
+  )
+  const compressGroup = group(
+    'Compress for the web',
+    { closed: true, help: 'Run this on the downloaded .ply, then point “Splat URL” above at the .sog. It is typically 15–20× smaller.' },
     h('pre', {}, sogCommand),
-    h('h3', {}, 'Video'),
+  )
+  const videoGroup = group(
+    'Video',
+    { help: 'Renders the whole timeline to an .mp4, frame by frame, through the animated camera (or the current view, if the camera has no keys). Labels are not part of the picture: they are drawn by the page, over the canvas.' },
     field('Size', videoSize),
     field('Frame rate', videoFps),
     field('Quality', videoQuality),
     h('div', { class: 'column' }, renderButton),
-    h('p', { class: 'fine' }, 'Renders the whole timeline to an .mp4, frame by frame, through the animated camera (or the current view, if the camera has no keys). Labels are not part of the picture: they are drawn by the page, over the canvas.'),
   )
 
   const scenePanels = buildScenePanels(editor)
   const timeline = buildTimeline(shell.timeline, editor)
-  shell.panel.append(selectSection, transformSection, ...scenePanels.panels, cameraSection, playerSection, exportSection)
+  // one tab per subject, as in Blender's Properties editor
+  const tabs = buildTabs(shell.panel, [
+    { id: 'edit', label: 'Edit', title: 'Select & clean up', icon: icons.tabEdit, groups: [selectionGroup, cleanupGroup, viewportGroup] },
+    { id: 'splat', label: 'Splat', title: 'Splat', icon: icons.tabSplat, groups: [transformGroup] },
+    { id: 'boxes', label: 'Boxes', title: 'Section boxes', icon: icons.tabBoxes, groups: scenePanels.boxes },
+    { id: 'forces', label: 'Forces', title: 'Forces', icon: icons.tabForces, groups: scenePanels.forces },
+    { id: 'labels', label: 'Labels', title: 'Labels', icon: icons.label, groups: scenePanels.labels },
+    { id: 'camera', label: 'Camera', title: 'Camera & views', icon: icons.tabCamera, groups: [lensGroup, startGroup, viewsGroup] },
+    { id: 'player', label: 'Player', title: 'Player', icon: icons.tabPlayer, groups: [stageGroup, orbitGroup, idleGroup] },
+    { id: 'export', label: 'Export', title: 'Export', icon: icons.tabExport, groups: [filesGroup, compressGroup, videoGroup] },
+  ])
+  const syncBadges = () => {
+    tabs.setBadge('boxes', editor.settings.sections.length)
+    tabs.setBadge('forces', editor.settings.forces.length)
+    tabs.setBadge('labels', editor.settings.annotations.length)
+  }
 
   // the callouts in the viewport are the player's own, so they need the player's styles
   document.head.append(h('style', { textContent: annotationCss }))
@@ -506,6 +539,9 @@ export function bindUi(shell: Shell, editor: Editor) {
   }
 
   function syncTool() {
+    // picking up a tool brings forward the properties that go with it
+    if (['rect', 'lasso', 'brush'].includes(editor.tool)) tabs.select('edit')
+    else if (editor.tool === 'annotate') tabs.select('labels')
     for (const [id, node] of toolButtons) node.setAttribute('aria-pressed', String(id === editor.tool))
     shell.viewport.dataset.tool = editor.tool
     showHint()
@@ -522,9 +558,15 @@ export function bindUi(shell: Shell, editor: Editor) {
   editor.events.on('selection', syncSelection)
   editor.events.on('transform', syncTransform)
   editor.events.on('settings', syncSettings)
+  let lastActive: string | null = null
   editor.events.on('scene', () => {
     scenePanels.sync()
+    syncBadges()
     showHint()
+    // pressing Edit on a box or force (or adding one) brings its properties forward
+    const active = editor.active ? `${editor.active.kind}:${editor.active.index}` : null
+    if (active && active !== lastActive) tabs.select(editor.active!.kind === 'section' ? 'boxes' : 'forces')
+    lastActive = active
   })
   editor.events.on('tool', syncTool)
   editor.events.on('history', syncHistory)
@@ -538,6 +580,7 @@ export function bindUi(shell: Shell, editor: Editor) {
   syncTransform()
   syncSettings()
   scenePanels.sync()
+  syncBadges()
   syncTool()
   syncHistory()
   syncBrush()

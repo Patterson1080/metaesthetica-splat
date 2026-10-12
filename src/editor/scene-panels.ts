@@ -1,5 +1,5 @@
 import { FORCE_DEFAULTS, FORCE_TYPES, drawsPoints, type Force, type ForceType, type SectionBox, type Vec3Tuple } from '../core/scene'
-import { button, field, h, icons, number, section, setValue, trim } from './dom'
+import { button, field, group, h, icons, number, setValue, trim } from './dom'
 import type { ActiveObject, Editor } from './editor'
 
 const AXES = ['X', 'Y', 'Z'] as const
@@ -83,7 +83,7 @@ function objectList<T extends { name?: string; enabled?: boolean }>(editor: Edit
   }
 }
 
-/** The panels for what lives in the scene besides the splat: section boxes, forces and labels. */
+/** The groups for what lives in the scene besides the splat: section boxes, forces and labels, one list per tab. */
 export function buildScenePanels(editor: Editor) {
   // `editor.settings` is replaced whenever a file opens, so it is read fresh in every handler
 
@@ -114,13 +114,15 @@ export function buildScenePanels(editor: Editor) {
   boxLabel.addEventListener('change', () => editSection({ label: boxLabel.checked }))
   const boxText = h('textarea', { rows: 3, spellcheck: true, placeholder: 'Description shown under the box (optional)' })
   boxText.addEventListener('change', () => editSection({ text: boxText.value }))
-  const sectionDetail = h('div', { class: 'detail' },
-    sectionRows.position.node,
-    sectionRows.rotation.node,
-    sectionRows.size.node,
-    h('label', { class: 'check', title: 'Outline the box in the player and set its name above it and the description below' }, boxLabel, 'Label this box (name + description)'),
+  const nothingToEdit = (what: string) => h('p', { class: 'fine' }, `Press Edit on a ${what} above to see its properties here.`)
+  const boxPlacement = group('Placement', { id: 'box-placement' }, sectionRows.position.node, sectionRows.rotation.node, sectionRows.size.node)
+  const boxLabelGroup = group(
+    'Label',
+    { id: 'box-label', help: 'Presents the box as a named component: the player outlines it and sets its name above it and this description below.' },
+    h('label', { class: 'check' }, boxLabel, 'Show as a labelled component'),
     boxText,
   )
+  const noBox = nothingToEdit('box')
 
   // what the boxes leave out: faded, or not drawn at all
   const restSlider = h('input', { type: 'range', min: '0', max: '1', step: '0.01', title: 'How visible the splats outside the boxes stay' })
@@ -133,19 +135,22 @@ export function buildScenePanels(editor: Editor) {
   const restHide = button('Hide the rest', () => editor.setSectionRest({ hidden: !editor.settings.sectionRest.hidden }), {
     title: 'Stop drawing the splats outside the boxes altogether',
   })
-  const restRow = h('div', { class: 'column' }, h('h3', {}, 'Rest of the splat'), field('Opacity', restSlider, restValue), h('div', { class: 'row' }, restHide))
-
   const bake = button('Delete the rest', () => editor.bakeSections(), {
+    class: 'danger',
     title: 'Make the cut permanent: delete every splat outside the boxes, faded or hidden. The export gets smaller; the boxes can then be removed.',
   })
-  const sectionPanel = section(
-    'Section boxes',
+  const boxList = group(
+    'Boxes',
+    { help: 'Boxes single out part of the splat without deleting anything, and the player can switch them off. In full view is what lies inside any keep box, minus what lies inside any cut box. Press Edit to move, rotate and scale a box with tools 1, 2 and 3.' },
     sectionList.node,
-    sectionDetail,
     h('div', { class: 'row' }, button('+ Keep box', () => editor.addSection('keep')), button('+ Cut box', () => editor.addSection('cut'))),
-    restRow,
-    h('div', { class: 'row' }, bake),
-    h('p', { class: 'fine' }, 'Boxes single out part of the splat without deleting anything, and the player can switch them off. In full view is what lies inside any keep box, minus what lies inside any cut box; the rest is faded by the slider, or not drawn. Press Edit to move, rotate and scale a box with tools 1 2 3, and to give it a label.'),
+    noBox,
+  )
+  const restGroup = group(
+    'Rest of the splat',
+    { help: 'What the boxes leave out can stay faintly visible, or not be drawn at all. Delete the rest makes the cut permanent.' },
+    field('Opacity', restSlider, restValue),
+    h('div', { class: 'row' }, restHide, bake),
   )
 
   // ── forces ───────────────────────────────────────────────────────────────
@@ -207,23 +212,30 @@ export function buildScenePanels(editor: Editor) {
   drawAs.addEventListener('change', () => editForce({ render: drawAs.value as Force['render'] }))
   const drawRow = field('Draw as', drawAs)
   drawRow.title = 'Splats: each moving splat keeps its own shape. Points: moving splats are drawn as plain round points of one size.'
-  // "Draw as" sits directly above the point size it governs
-  const forceDetail = h('div', { class: 'detail' },
-    forceVec.position.node,
-    forceVec.rotation.node,
-    ...paramRows.flatMap((row) => (row.key === 'dotSize' ? [drawRow, row.node] : [row.node])),
-    field('Color', color),
+  // a force's dozen properties, in the three questions they answer: where, how it moves, how it looks
+  const rowOf = (key: NumericKey) => paramRows.find((row) => row.key === key)!.node
+  const forcePlacement = group('Placement', { id: 'force-placement' }, forceVec.position.node, forceVec.rotation.node, rowOf('radius'))
+  const forceMotion = group(
+    'Motion',
+    { id: 'force-motion', help: 'Strength is the speed of the motion. Share moving below 1 leaves the rest of the splats in place to hold the form. Travel time is how long a splat flows before it fades and starts again from home. Wander adds irregularity.' },
+    rowOf('strength'), rowOf('amount'), rowOf('cycle'), rowOf('noise'), rowOf('noiseScale'), rowOf('lift'), rowOf('pull'),
   )
+  const forceLook = group(
+    'Look',
+    { id: 'force-look', help: 'Draw what the force carries as splats in their own shape, or as plain round points. Tint above 0 gives them the color.' },
+    drawRow, rowOf('dotSize'), rowOf('tint'), field('Color', color),
+  )
+  const noForce = nothingToEdit('force')
 
   const preview = h('input', { type: 'checkbox' })
   preview.addEventListener('change', () => editor.setFlowPreview(preview.checked))
-  const forcePanel = section(
+  const forceGroup = group(
     'Forces',
+    { help: 'A force moves the splat’s own points: those in its reach travel along it, fade and start again from home. Nothing is added. Press Edit to move a force with tools 1, 2 and 3 (scale changes its reach); its spine is the swirl axis or wind direction. Forces rest while a selection tool is in use, and are only layered correctly on WebGPU.' },
     forceList.node,
-    forceDetail,
-    h('div', { class: 'row' }, ...FORCE_TYPES.map((type) => button(`+ ${type[0].toUpperCase()}${type.slice(1)}`, () => editor.addForce(type)))),
+    h('div', { class: 'row add-kinds' }, ...FORCE_TYPES.map((type) => button(`+ ${type[0].toUpperCase()}${type.slice(1)}`, () => editor.addForce(type)))),
     h('label', { class: 'check' }, preview, 'Run forces in the viewport'),
-    h('p', { class: 'fine' }, 'A force moves the splat’s own points: those in its reach travel along it, fade and start again from home, keeping their shape and color. Nothing is added. “Draw as” chooses whether what moves is drawn as splats or as plain points. Lower “Share moving” to leave part of the form in place; raise “Tint” to recolor what moves. Press Edit to move the force with tools 1 2 3 (scale changes its reach); its spine is the swirl axis or wind direction. Forces rest while a selection tool is in use. Moving splats are only layered correctly on WebGPU, which the player picks by itself for scenes with forces.'),
+    noForce,
   )
 
   // ── labels ───────────────────────────────────────────────────────────────
@@ -234,14 +246,13 @@ export function buildScenePanels(editor: Editor) {
   body.addEventListener('change', () => {
     if (editor.activeAnnotation !== null) editor.updateAnnotation(editor.activeAnnotation, { text: body.value })
   })
-  const labelDetail = h('div', { class: 'detail' }, body)
-  const labelPanel = section(
+  const labelGroup = group(
     'Labels',
+    { help: 'With the Label tool, click the splat to pin a label there. Drag its text to move it, drag its dot to re-pin it. Labels are plain text over the splat with no background; the player can hide them.' },
     labelList,
-    labelDetail,
     h('div', { class: 'row' }, button('Place labels', () => editor.setTool('annotate'), { title: 'Switch to the Label tool (A)' })),
-    h('p', { class: 'fine' }, 'With the Label tool, click the splat to pin a label there. Drag its text to move it, drag its dot to re-pin it. Labels are plain text over the splat with no background; the player can hide them.'),
   )
+  const labelDetail = group('Text', { id: 'label-text' }, body)
 
   function syncLabels() {
     const { annotations } = editor.settings
@@ -272,7 +283,8 @@ export function buildScenePanels(editor: Editor) {
   function sync() {
     sectionList.sync()
     const box = activeSection() === null ? null : editor.settings.sections[activeSection()!]
-    sectionDetail.hidden = !box
+    boxPlacement.hidden = boxLabelGroup.hidden = !box
+    noBox.hidden = !!box || editor.settings.sections.length === 0
     if (box) {
       sectionRows.position.set(box.position)
       sectionRows.rotation.set(box.rotation)
@@ -284,7 +296,7 @@ export function buildScenePanels(editor: Editor) {
     const anyBox = editor.settings.sections.some((s) => s.enabled !== false)
     bake.disabled = !anyBox
     const rest = editor.settings.sectionRest
-    restRow.hidden = editor.settings.sections.length === 0
+    restGroup.hidden = editor.settings.sections.length === 0
     restSlider.disabled = rest.hidden
     setValue(restSlider, String(rest.opacity))
     restValue.textContent = rest.opacity.toFixed(2)
@@ -293,7 +305,8 @@ export function buildScenePanels(editor: Editor) {
 
     forceList.sync()
     const force = activeForce() === null ? null : editor.settings.forces[activeForce()!]
-    forceDetail.hidden = !force
+    forcePlacement.hidden = forceMotion.hidden = forceLook.hidden = !force
+    noForce.hidden = !!force || editor.settings.forces.length === 0
     if (force) {
       forceVec.position.set(force.position)
       forceVec.rotation.set(force.rotation ?? [0, 0, 0])
@@ -313,5 +326,10 @@ export function buildScenePanels(editor: Editor) {
     syncLabels()
   }
 
-  return { panels: [sectionPanel, forcePanel, labelPanel], sync }
+  return {
+    boxes: [boxList, boxPlacement, boxLabelGroup, restGroup],
+    forces: [forceGroup, forcePlacement, forceMotion, forceLook],
+    labels: [labelGroup, labelDetail],
+    sync,
+  }
 }

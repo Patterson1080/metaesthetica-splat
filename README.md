@@ -45,6 +45,15 @@ npm run sample     # regenerate the procedural sample splats in public/samples/
 
    `.sog` is the format to publish. The procedural sample shrinks from 4.2 MB to 0.8 MB; real captures, which carry spherical harmonics, typically shrink far more.
 
+### Finding your way around
+
+The editor is laid out like a 3D application: tools down the left edge, the timeline under the viewport, and a **properties panel** on the right organised the way Blender's is.
+
+- A rail of **tabs**, one per subject: *Edit* (selection and clean-up), *Splat* (its transform), *Boxes*, *Forces*, *Labels*, *Camera*, *Player* and *Export*. A small count on the Boxes, Forces and Labels tabs shows how many the scene has.
+- Under each tab, a few **collapsible groups** of related properties. A force, for instance, is *Placement*, *Motion* and *Look*. Click a group's heading to fold it; the editor remembers what you left open, and which tab you were on.
+- A **?** on a group opens a short explanation of what it does, so the panel shows controls rather than prose.
+- Tabs follow what you pick up: a selection tool brings *Edit* forward, the label tool *Labels*, and pressing **Edit** on a box or force its own tab.
+
 ### Section boxes
 
 Add a *keep* or *cut* box, press **Edit** on its row, and the move, rotate and scale tools act on the box instead of the splat (Esc hands them back). A new keep box starts as a slice through the middle, facing the camera, so it does something the moment it appears.
