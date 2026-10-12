@@ -108,26 +108,33 @@ export interface AnimatedScene {
 const clamp01 = (n: number) => Math.min(Math.max(n, 0), 1)
 
 /**
+ * A sampled value as the scene will hold it: sizes and reaches stay positive, shares stay
+ * shares. A smooth curve can overshoot its keys, so what a track says is not always what
+ * the scene gets.
+ */
+export function constrain(ref: TargetRef, value: AnimValue): AnimValue {
+  if (typeof value === 'number') {
+    if (ref.kind === 'rest' || ref.prop === 'amount' || ref.prop === 'tint') return clamp01(value)
+    if (ref.prop === 'radius' || ref.prop === 'dotSize' || ref.prop === 'noiseScale') return Math.max(value, 1e-4)
+    return value
+  }
+  return ref.prop === 'size' || ref.prop === 'scale' ? value.map((v) => Math.max(v, 1e-3)) : [...value]
+}
+
+/**
  * Write a sampled value into the scene data it animates. Returns false for targets that are
  * not scene data (the splat's transform and the camera belong to the viewer) or that point
  * at a force or box that is no longer there.
  */
 export function writeSceneValue(scene: AnimatedScene, ref: TargetRef, value: AnimValue): boolean {
   if (ref.kind === 'rest') {
-    if (typeof value === 'number') scene.sectionRest.opacity = clamp01(value)
+    if (typeof value === 'number') scene.sectionRest.opacity = constrain(ref, value) as number
     return true
   }
   if (ref.kind !== 'force' && ref.kind !== 'section') return false
   const item = (ref.kind === 'force' ? scene.forces : scene.sections)[ref.index] as unknown as Record<string, AnimValue> | undefined
   if (!item) return false
-  if (typeof value === 'number') {
-    // sizes and reaches must stay positive, shares stay shares
-    const positive = ref.prop === 'radius' || ref.prop === 'dotSize' || ref.prop === 'noiseScale'
-    const share = ref.prop === 'amount' || ref.prop === 'tint'
-    item[ref.prop] = share ? clamp01(value) : positive ? Math.max(value, 1e-4) : value
-  } else {
-    item[ref.prop] = ref.prop === 'size' ? value.map((v) => Math.max(v, 1e-3)) : [...value]
-  }
+  item[ref.prop] = constrain(ref, value)
   return true
 }
 
@@ -141,7 +148,8 @@ export function readSceneValue(scene: AnimatedScene, ref: TargetRef): AnimValue 
   return typeof value === 'number' ? value : [...value]
 }
 
-const SAME_TIME = 1e-3
+/** Two keys closer together than this, in seconds, are the same key */
+export const SAME_TIME = 1e-3
 
 /** Set a key on a track at time `t`, replacing one already there. Keeps the keys in time order. */
 export function insertKey(animation: Animation, target: string, t: number, value: AnimValue): Keyframe {

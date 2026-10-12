@@ -1,12 +1,14 @@
 import { annotationCss } from '../core/annotations'
 import { parseScene, type SplatScene, type Vec3Tuple } from '../core/scene'
 import { SplatPlayer } from '../player/index'
-import { button, field, group, h, icons, number, setValue, trim } from './dom'
+import { button, field, group, h, icons, number, setValue, trim, vec3Row } from './dom'
 import type { Editor, Tool, Transform } from './editor'
+import { createKeyToggles } from './key-toggle'
 import { download } from './ply-export'
 import { buildScenePanels } from './scene-panels'
 import { buildTabs } from './tabs'
 import { buildTimeline } from './timeline'
+import { buildViewGizmo } from './view-gizmo'
 
 const SAMPLE_URL = `${import.meta.env.BASE_URL}samples/knot.ply`
 
@@ -46,6 +48,8 @@ const isTyping = (target: EventTarget | null) =>
 
 export function bindUi(shell: Shell, editor: Editor) {
   const { viewer } = editor
+  // the diamond at the end of every property that can be animated
+  const keys = createKeyToggles(editor)
   const fileInput = h('input', { type: 'file', accept: '.ply,.sog,.json', multiple: true, hidden: true })
   document.body.append(fileInput)
 
@@ -221,7 +225,9 @@ export function bindUi(shell: Shell, editor: Editor) {
       ),
     )
     transformInputs[key] = inputs
-    return field(label, ...inputs)
+    const row = field(label, ...inputs)
+    keys.attach(row, () => `splat.${key}`)
+    return row
   }
   const transformGroup = group(
     'Transform',
@@ -247,7 +253,22 @@ export function bindUi(shell: Shell, editor: Editor) {
   const startGo = button('Go', () => editor.settings.initial && editor.goToPose(editor.settings.initial))
   const startClear = button('Clear', () => editor.updateSettings({ initial: null }))
   const poseList = h('ul', { class: 'poses' })
-  const lensGroup = group('Lens', {}, field('Field of view', fov, fovValue))
+  const fovRow = field('Field of view', fov, fovValue)
+  keys.attach(fovRow, () => 'camera.fov')
+  const lensGroup = group('Lens', {}, fovRow)
+  // where the viewport camera is: the numbers behind what the mouse does
+  const cameraRows = {
+    position: vec3Row('Position', 0.1, (position) => editor.setViewPose({ position })),
+    target: vec3Row('Target', 0.1, (target) => editor.setViewPose({ target })),
+  }
+  keys.attach(cameraRows.position.node, () => 'camera.position')
+  keys.attach(cameraRows.target.node, () => 'camera.target')
+  const viewpointGroup = group(
+    'Viewpoint',
+    { id: 'camera-viewpoint', help: 'Where the viewport camera stands and the point it looks at and orbits. Their diamonds key the camera on the timeline at the playhead, one property at a time; Key camera (Shift+K) keys all three.' },
+    cameraRows.position.node,
+    cameraRows.target.node,
+  )
   const startGroup = group(
     'Start view',
     { help: 'The view the player opens on, and returns to on reset.' },
@@ -408,7 +429,8 @@ export function bindUi(shell: Shell, editor: Editor) {
     h('div', { class: 'column' }, renderButton),
   )
 
-  const scenePanels = buildScenePanels(editor)
+  const scenePanels = buildScenePanels(editor, keys)
+  const gizmo = buildViewGizmo(shell.viewport, editor)
   const timeline = buildTimeline(shell.timeline, editor)
   // one tab per subject, as in Blender's Properties editor
   const tabs = buildTabs(shell.panel, [
@@ -417,7 +439,7 @@ export function bindUi(shell: Shell, editor: Editor) {
     { id: 'boxes', label: 'Boxes', title: 'Section boxes', icon: icons.tabBoxes, groups: scenePanels.boxes },
     { id: 'forces', label: 'Forces', title: 'Forces', icon: icons.tabForces, groups: scenePanels.forces },
     { id: 'labels', label: 'Labels', title: 'Labels', icon: icons.label, groups: scenePanels.labels },
-    { id: 'camera', label: 'Camera', title: 'Camera & views', icon: icons.tabCamera, groups: [lensGroup, startGroup, viewsGroup] },
+    { id: 'camera', label: 'Camera', title: 'Camera & views', icon: icons.tabCamera, groups: [viewpointGroup, lensGroup, startGroup, viewsGroup] },
     { id: 'player', label: 'Player', title: 'Player', icon: icons.tabPlayer, groups: [stageGroup, orbitGroup, idleGroup] },
     { id: 'export', label: 'Export', title: 'Export', icon: icons.tabExport, groups: [filesGroup, compressGroup, videoGroup] },
   ])
@@ -554,6 +576,26 @@ export function bindUi(shell: Shell, editor: Editor) {
     redo.title = editor.history.redoLabel ? `Redo ${editor.history.redoLabel} (Ctrl+Shift+Z)` : 'Redo (Ctrl+Shift+Z)'
   }
 
+  // several events arrive together (a key added is 'scene' and 'animation' at once); the diamonds are brought up to date once
+  let keysQueued = false
+  const syncKeys = () => {
+    if (keysQueued) return
+    keysQueued = true
+    queueMicrotask(() => {
+      keysQueued = false
+      keys.sync()
+    })
+  }
+  function syncView() {
+    // during playback the panels rest; they catch up when it stops
+    if (editor.playing) return
+    const pose = viewer.controls.getPose()
+    for (const input of [...cameraRows.position.inputs, ...cameraRows.target.inputs]) input.disabled = !editor.doc
+    cameraRows.position.set(pose.position)
+    cameraRows.target.set(pose.target)
+    keys.sync((target) => target.startsWith('camera.'))
+  }
+
   editor.events.on('doc', syncDoc)
   editor.events.on('selection', syncSelection)
   editor.events.on('transform', syncTransform)
@@ -570,6 +612,13 @@ export function bindUi(shell: Shell, editor: Editor) {
   })
   editor.events.on('tool', syncTool)
   editor.events.on('history', syncHistory)
+  editor.events.on('view', syncView)
+  for (const event of ['doc', 'animation', 'scene', 'transform', 'settings'] as const) editor.events.on(event, syncKeys)
+  editor.events.on('time', () => {
+    if (editor.playing) return
+    syncView()
+    syncKeys()
+  })
   editor.events.on('notice', (text) => notice(text))
   editor.events.on('busy', (text) => {
     shell.busy.hidden = text === null
@@ -584,11 +633,43 @@ export function bindUi(shell: Shell, editor: Editor) {
   syncTool()
   syncHistory()
   syncBrush()
+  syncView()
+  keys.sync()
 
   // ── keyboard ─────────────────────────────────────────────────────────────
 
+  /** The numpad is the view, as in Blender. Returns false for a key it has no use for. */
+  function numpad(e: KeyboardEvent): boolean {
+    const { nav } = editor
+    const ctrl = e.ctrlKey
+    switch (e.code) {
+      case 'Numpad1': nav.snap(ctrl ? 'back' : 'front'); break
+      case 'Numpad3': nav.snap(ctrl ? 'left' : 'right'); break
+      case 'Numpad7': nav.snap(ctrl ? 'bottom' : 'top'); break
+      case 'Numpad9': nav.opposite(); break
+      case 'Numpad5': nav.toggleOrthographic(); break
+      case 'Numpad0': gizmo.toggleCamera(); break
+      // 4 6 8 2 orbit in steps of 15°; with Ctrl they pan
+      case 'Numpad4': ctrl ? nav.pan(40, 0) : nav.orbit(-15, 0); break
+      case 'Numpad6': ctrl ? nav.pan(-40, 0) : nav.orbit(15, 0); break
+      case 'Numpad8': ctrl ? nav.pan(0, 40) : nav.orbit(0, -15); break
+      case 'Numpad2': ctrl ? nav.pan(0, -40) : nav.orbit(0, 15); break
+      case 'NumpadAdd': nav.zoom(0.85); break
+      case 'NumpadSubtract': nav.zoom(1.18); break
+      case 'NumpadDecimal': editor.frame(); break
+      default: return false
+    }
+    return true
+  }
+
   window.addEventListener('keydown', (e) => {
     if (isTyping(e.target) || previewDialog.open) return
+    // before the tools' own 1, 2 and 3, which the numpad's digits would otherwise pick up;
+    // a key the focused viewport already acted on (its own + and −) is left alone
+    if (e.code.startsWith('Numpad') && editor.doc && !e.altKey && !e.metaKey && !e.defaultPrevented && numpad(e)) {
+      e.preventDefault()
+      return
+    }
     const key = e.key.toLowerCase()
     const mod = e.ctrlKey || e.metaKey
 

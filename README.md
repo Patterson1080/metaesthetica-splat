@@ -54,6 +54,19 @@ The editor is laid out like a 3D application: tools down the left edge, the time
 - A **?** on a group opens a short explanation of what it does, so the panel shows controls rather than prose.
 - Tabs follow what you pick up: a selection tool brings *Edit* forward, the label tool *Labels*, and pressing **Edit** on a box or force its own tab.
 
+### Views
+
+The **navigation gizmo** in the viewport's top right corner is Blender's: the world's axes as the camera sees them. Y is up.
+
+- **Click an end** to look along that axis: X is the right view, Y the top, Z the front. Click the same end again for the opposite side. The view turns there and switches to **orthographic**, so nothing is foreshortened and the splat can be lined up against the grid.
+- **Drag** anywhere on the gizmo to orbit. Orbiting out of an axis view returns to perspective by itself, as Blender's auto perspective does. Panning and zooming keep the view.
+- Under it: **zoom** and **pan** (drag them), **look through the animated camera**, and **perspective / orthographic**. A projection chosen with that last button stays until you change it.
+- The name of the view is written in the top left corner: *Front Orthographic*, *User Perspective*, *Camera Perspective*.
+
+The numpad does the same as in Blender: `1` front, `3` right, `7` top, `9` the opposite side, `5` perspective / orthographic, `0` through the camera, `4` `6` `8` `2` orbit in steps of 15° (with `Ctrl` they pan), `+` `−` zoom, `.` frame the splat. `Ctrl+1` `3` `7` give back, left and bottom, but most browsers keep `Ctrl`+number for switching tabs, so use `9` or a second click on the gizmo.
+
+Orthographic is the editor's viewport only. The player and a rendered video look through the scene's camera, which is always a perspective camera; a poster taken from an orthographic view is taken in perspective from the same place. **Frame** (`F`) brings the splat into view without turning the camera, so an axis view stays one.
+
 ### Section boxes
 
 Add a *keep* or *cut* box, press **Edit** on its row, and the move, rotate and scale tools act on the box instead of the splat (Esc hands them back). A new keep box starts as a slice through the middle, facing the camera, so it does something the moment it appears.
@@ -104,6 +117,7 @@ What can be keyed:
 
 Setting keys:
 
+- **The diamond beside a property** keys that property at the playhead, as in Blender's Properties editor. Every property in the table above has one at the end of its row. It also shows where the property stands: a dot for not animated, a hollow green diamond for animated with no key here, a filled yellow one for a key at the playhead (click it to remove that key), and orange when the value was changed by hand and no longer matches its animation (click to key the new value). The row's fields are tinted the same way.
 - **`K`** keys everything about what you are editing at the playhead: the force or box you pressed **Edit** on, otherwise the splat.
 - **Key camera** (`Shift+K`) keys the current view. Move the playhead, orbit to the next view, key again: the camera travels between them on a smooth path.
 - **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed.
@@ -145,7 +159,10 @@ Things to know:
 | `Ctrl+A` · `Ctrl+I` | select all · invert |
 | `Esc` | back out: clear the selection, then stop editing a box or force, then return to navigate |
 | `Ctrl+Z` · `Ctrl+Shift+Z` | undo · redo |
-| `F` | frame the splat |
+| `F` | frame the splat, keeping the view's direction |
+| Numpad `1` `3` `7` · `9` | front · right · top view · the opposite side |
+| Numpad `5` · `0` | perspective / orthographic · look through the animated camera |
+| Numpad `4` `6` `8` `2` · `+` `−` · `.` | orbit 15° (with `Ctrl`: pan) · zoom · frame |
 | `Space` | play / pause the timeline |
 | `K` · `Shift+K` | key what is being edited · key the camera |
 | `Home` | playhead to the start |
@@ -273,7 +290,8 @@ A track's `target` is a path: `splat.position|rotation|scale`, `camera.position|
 src/core/      scene format · SplatViewer (engine wrapper: device, camera, loading, render-on-demand) · orbit controls
                effects (the per-splat shader hook) · sections · forces · annotations (the label layer)
 src/player/    SplatPlayer + <splat-player>, its shadow-DOM styles, the player.html entry
-src/editor/    Editor model, per-splat edit state, selection tools, undo history, .ply export, UI panels
+src/editor/    Editor model, per-splat edit state, selection tools, undo history, .ply export, UI panels,
+               timeline, view navigation (axis views, the gizmo), key diamonds
 scripts/       make-sample.mjs: the procedural sample
 public/samples knot.ply (raw, with floaters), knot-clean.ply/.sog, and three scenes: plain, infographic, flow
 docs/          WEBSITE-INTEGRATION.md

@@ -121,6 +121,31 @@ export function number(onCommit: (value: number) => void, props: { step?: number
   return input
 }
 
+const AXES = ['X', 'Y', 'Z'] as const
+
+/** Three number inputs editing one vector. */
+export function vec3Row(label: string, step: number, commit: (value: [number, number, number]) => void) {
+  let current: [number, number, number] = [0, 0, 0]
+  const inputs = AXES.map((axis, i) =>
+    number(
+      (value) => {
+        const next: [number, number, number] = [...current]
+        next[i] = value
+        commit(next)
+      },
+      { step, title: `${label} ${axis}` },
+    ),
+  )
+  return {
+    node: field(label, ...inputs),
+    inputs,
+    set(value: [number, number, number]) {
+      current = value
+      inputs.forEach((input, i) => setValue(input, trim(value[i])))
+    },
+  }
+}
+
 export function button(label: string, onClick: () => void, props: { class?: string; title?: string; icon?: string } = {}) {
   const node = h('button', { type: 'button', class: props.class ?? '', title: props.title ?? '', on: { click: onClick } })
   if (props.icon) {
@@ -153,6 +178,11 @@ export const icons = {
   record: svgIcon('<circle cx="12" cy="12" r="5" fill="currentColor"/>'),
   diamond: svgIcon('<path d="M12 5l7 7-7 7-7-7z"/>'),
   chevron: svgIcon('<path d="M9 6l6 6-6 6"/>'),
+  // the viewport's navigation buttons
+  zoom: svgIcon('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/>'),
+  hand: svgIcon('<path d="M8 12.5V6.2a1.4 1.4 0 0 1 2.8 0V11M10.8 10.5V4.8a1.4 1.4 0 0 1 2.8 0V11M13.6 10.5V6a1.4 1.4 0 0 1 2.8 0v6M16.4 9.5a1.4 1.4 0 0 1 2.8 0v5.2c0 3.6-2.4 6.3-6 6.3-2.6 0-4.2-1.1-5.6-3.3L5 13.9c-.9-1.5 1-2.9 2.2-1.6L8 13.4"/>'),
+  ortho: svgIcon('<rect x="4" y="4" width="16" height="16"/><path d="M4 9.3h16M4 14.7h16M9.3 4v16M14.7 4v16"/>'),
+  persp: svgIcon('<path d="M7 5h10l4 14H3z"/><path d="M5.6 10h12.8M4.4 14.4h15.2M10.3 5L8.4 19M13.7 5l1.9 14"/>'),
   // the properties tabs
   tabEdit: svgIcon('<ellipse cx="12" cy="9.5" rx="8" ry="5.5" stroke-dasharray="3 2.5"/><path d="M8 14.5c-1.5 1-1.5 3 .5 3.5s2 2-.5 3"/>'),
   tabSplat: svgIcon('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),

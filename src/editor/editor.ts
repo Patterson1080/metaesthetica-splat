@@ -2,6 +2,7 @@ import {
   Entity,
   Gizmo,
   Mat4,
+  Quat,
   RenderComponentSystem,
   RotateGizmo,
   ScaleGizmo,
@@ -10,7 +11,7 @@ import {
   type GSplatData,
   type TransformGizmo,
 } from 'playcanvas'
-import { ANIMATABLE, dropTracksFor, evaluate, insertKey, parseTarget, readSceneValue, sampleTrack, targetOf, writeSceneValue, type AnimValue, type TargetRef } from '../core/animation'
+import { ANIMATABLE, SAME_TIME, constrain, dropTracksFor, evaluate, insertKey, parseTarget, readSceneValue, sampleTrack, targetOf, writeSceneValue, type AnimValue, type TargetRef } from '../core/animation'
 import { AnnotationLayer } from '../core/annotations'
 import { SectionFrameLayer } from '../core/section-frames'
 import { SplatEffects } from '../core/effects'
@@ -44,6 +45,7 @@ import { History, diffBytes } from './history'
 import { exportPly } from './ply-export'
 import { SelectionTools, type ScreenTest, type SelectMode } from './selection'
 import { DELETED, SELECTED, SplatState } from './splat-state'
+import { ViewNavigation } from './view-nav'
 
 export type Tool = 'navigate' | 'rect' | 'lasso' | 'brush' | 'move' | 'rotate' | 'scale' | 'annotate'
 
@@ -97,6 +99,16 @@ export interface Doc {
   name: string
 }
 
+/** How a property stands on the timeline at the playhead: what the diamond beside it shows */
+export interface KeyState {
+  /** It has a track */
+  animated: boolean
+  /** One of its keys sits at the playhead */
+  onKey: boolean
+  /** Its value is not what its track says it is here: changed by hand, and not keyed yet */
+  changed: boolean
+}
+
 /** A section box or force that the gizmo tools are pointed at instead of the splat */
 export interface ActiveObject {
   kind: 'section' | 'force'
@@ -118,6 +130,8 @@ type EditorEvents = {
   animation: []
   /** The playhead moved, or playback started or stopped */
   time: []
+  /** The viewport camera moved, or its projection changed */
+  view: []
   tool: [tool: Tool]
   history: []
   /** A long task started (message) or finished (null) */
@@ -136,6 +150,25 @@ const PROP_LABELS: Record<string, string> = {
   position: 'Position', rotation: 'Rotation', scale: 'Scale', size: 'Size', target: 'Target', fov: 'Field of view',
   radius: 'Reach', strength: 'Strength', amount: 'Share moving', dotSize: 'Point size', tint: 'Tint',
   noise: 'Wander', noiseScale: 'Eddy size', lift: 'Lift', pull: 'Pull in', opacity: 'Opacity',
+}
+
+/** Values this close are the same value: a camera pose is rounded on its way in and out */
+const SAME_VALUE = 2e-3
+const quatA = new Quat()
+const quatB = new Quat()
+
+function sameValue(prop: string, a: AnimValue, b: AnimValue): boolean {
+  if (typeof a === 'number' || typeof b === 'number') {
+    return typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= SAME_VALUE * Math.max(1, Math.abs(a), Math.abs(b))
+  }
+  if (prop === 'rotation') {
+    // the same turn can be written as different angles, so compare the turns themselves
+    quatA.setFromEulerAngles(a[0], a[1], a[2])
+    quatB.setFromEulerAngles(b[0], b[1], b[2])
+    const dot = quatA.x * quatB.x + quatA.y * quatB.y + quatA.z * quatB.z + quatA.w * quatB.w
+    return 1 - Math.abs(dot) < 1e-6
+  }
+  return a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= SAME_VALUE * Math.max(1, Math.abs(v), Math.abs(b[i])))
 }
 
 const stem = (filename: string) => filename.replace(/\.(compressed\.ply|ply|sog|json)$/i, '')
@@ -163,6 +196,8 @@ export class Editor {
   readonly selection: SelectionTools
   readonly callouts: AnnotationLayer
   readonly frames: SectionFrameLayer
+  /** Axis views, projection and the name of what the viewport shows */
+  readonly nav: ViewNavigation
   doc: Doc | null = null
   settings = defaultSettings()
   tool: Tool = 'navigate'
@@ -193,6 +228,8 @@ export class Editor {
   private culled: ((x: number, y: number, z: number) => boolean) | null = null
   private helpersHidden = false
   private pressed: { x: number; y: number } | null = null
+  /** Where the viewport camera was when the panels last heard about it */
+  private viewSeen = ''
 
   static async create(canvas: HTMLCanvasElement, overlay: HTMLCanvasElement, device: DeviceType = 'webgl2') {
     const viewer = await SplatViewer.create(canvas, { device, componentSystems: [RenderComponentSystem] })
@@ -207,6 +244,11 @@ export class Editor {
     // an editor camera should go anywhere; the limits in `settings` only bind the player
     controls.limits.minDistance = 0.01
     controls.limits.maxDistance = 10_000
+    // all the way to the poles, for the top and bottom views
+    controls.limits.minPitch = -90
+    controls.limits.maxPitch = 90
+    this.nav = new ViewNavigation(viewer)
+    this.nav.onChange = () => this.events.emit('view')
 
     this.selection = new SelectionTools(canvas, overlay)
     this.selection.onSelect = (test, mode) => this.selectOnScreen(test, mode)
@@ -276,12 +318,16 @@ export class Editor {
     })
 
     viewer.events.on('update', (dt) => {
+      this.nav.update()
       if (this.playing && !this.rendering) this.stepPlayback(dt)
       if (this.doc?.effects.advance(dt)) viewer.requestRender()
       this.callouts.update()
       this.frames.update()
     })
-    app.on('prerender', () => this.drawHelpers())
+    app.on('prerender', () => {
+      this.noteView()
+      this.drawHelpers()
+    })
     this.applyTool()
   }
 
@@ -741,8 +787,29 @@ export class Editor {
     this.viewer.requestRender()
   }
 
+  /** Bring the splat into view without turning the camera, so an axis view stays one. */
   frame() {
-    this.viewer.frameScene(true)
+    this.viewer.frameScene(true, true)
+  }
+
+  /** Put the viewport camera somewhere by its numbers. */
+  setViewPose(patch: Partial<Pick<CameraPose, 'position' | 'target'>>) {
+    this.viewer.controls.setPose({ ...this.viewer.controls.getPose(), ...patch })
+    this.nav.leaveCamera()
+    this.viewer.requestRender()
+    this.events.emit('view')
+  }
+
+  /** A frame is about to be drawn: tell the panels if the camera is somewhere new. */
+  private noteView() {
+    if (this.rendering) return
+    const { camera, controls } = this.viewer
+    const p = camera.getPosition()
+    const r = camera.getRotation()
+    const seen = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)},${r.x.toFixed(5)},${r.y.toFixed(5)},${r.z.toFixed(5)},${r.w.toFixed(5)},${controls.distance.toFixed(4)},${controls.orthographic}`
+    if (seen === this.viewSeen) return
+    this.viewSeen = seen
+    this.events.emit('view')
   }
 
   // ── scene objects: undo and syncing ──────────────────────────────────────
@@ -1029,6 +1096,8 @@ export class Editor {
         this.settings.fov = camera.fov
         this.viewer.setFov(camera.fov)
       }
+      // the scene's camera is a perspective camera, whatever the viewport was showing
+      if (camera.position || camera.target) this.nav.enterCamera()
     }
 
     if (!this.playing && !this.rendering) {
@@ -1083,6 +1152,40 @@ export class Editor {
   /** Add a key to one track at the playhead, with the value it has there. */
   keyTrack(target: string) {
     this.keyTargets('Add key', [target])
+  }
+
+  /** How a property stands on the timeline at the playhead. */
+  keyState(target: string): KeyState {
+    const track = this.animation.tracks.find((candidate) => candidate.target === target)
+    const ref = parseTarget(target)
+    if (!this.doc || !track || !ref || track.keys.length === 0) return { animated: false, onKey: false, changed: false }
+    const now = this.valueOf(ref)
+    const then = sampleTrack(track, this.time)
+    return {
+      animated: true,
+      onKey: track.keys.some((key) => Math.abs(key.t - this.time) < SAME_TIME),
+      changed: now !== null && then !== null && !sameValue(ref.prop, now, constrain(ref, then)),
+    }
+  }
+
+  /**
+   * What clicking the diamond beside a property does, as in Blender: key it at the playhead,
+   * or, where a key already sits and the value has not been touched since, take that key away.
+   */
+  toggleKey(target: string) {
+    if (!this.doc) return
+    const state = this.keyState(target)
+    const at = `${this.time.toFixed(2)} s`
+    if (state.onKey && !state.changed) {
+      const track = this.animation.tracks.find((candidate) => candidate.target === target)
+      const key = track?.keys.find((candidate) => Math.abs(candidate.t - this.time) < SAME_TIME)
+      if (!key) return
+      this.removeKey(target, key)
+      this.events.emit('notice', `Removed the key on ${this.trackLabel(target)} at ${at}`)
+    } else {
+      this.keyTargets('Add key', [target])
+      this.events.emit('notice', `Keyed ${this.trackLabel(target)} at ${at}`)
+    }
   }
 
   /** A key is about to be dragged along its track: the whole drag is one undo step. */
@@ -1145,8 +1248,14 @@ export class Editor {
 
   setFollowCamera(on: boolean) {
     this.followCamera = on
+    if (!on) this.nav.leaveCamera()
     this.applyTime()
     this.events.emit('animation')
+  }
+
+  /** Whether there is an animated camera to look through */
+  get hasCameraKeys() {
+    return this.animation.tracks.some((track) => track.target === 'camera.position' || track.target === 'camera.target')
   }
 
   /** A readable name for a track: "Updraft swirl · Strength". */
@@ -1386,6 +1495,8 @@ export class Editor {
     if (selected.length) doc.state.commit()
     this.helpersHidden = true
     for (const gizmo of Object.values(this.gizmos)) gizmo.detach()
+    // the player and a video look through the scene's camera, which is never orthographic
+    const restoreProjection = this.nav.borrowPerspective()
     try {
       // the tint is removed in the work buffer, which lags the flags by a frame
       this.viewer.app.render()
@@ -1394,6 +1505,7 @@ export class Editor {
       for (const i of selected) flags[i] = SELECTED
       if (selected.length) doc.state.commit()
       this.helpersHidden = false
+      restoreProjection()
       this.attachGizmo()
       this.viewer.requestRender(2)
     }
@@ -1428,6 +1540,9 @@ export class Editor {
     this.pause()
     const resumeAt = this.time
     const follow = this.followCamera
+    // the render rides the animated camera; a free viewport gets its own view back afterwards
+    const { controls } = this.viewer
+    const view = { yaw: controls.yaw, pitch: controls.pitch, distance: controls.distance, target: controls.target.clone() }
     this.rendering = true
     this.followCamera = true
 
@@ -1465,6 +1580,14 @@ export class Editor {
     } finally {
       this.rendering = false
       this.followCamera = follow
+      if (!follow) {
+        controls.yaw = view.yaw
+        controls.pitch = view.pitch
+        controls.distance = view.distance
+        controls.target.copy(view.target)
+        controls.snap()
+        this.nav.leaveCamera()
+      }
       this.setTime(resumeAt)
       this.afterPlayback()
     }

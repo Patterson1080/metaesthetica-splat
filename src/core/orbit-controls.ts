@@ -1,7 +1,10 @@
-import { Vec3, math, type Entity } from 'playcanvas'
+import { PROJECTION_ORTHOGRAPHIC, PROJECTION_PERSPECTIVE, Vec3, math, type Entity } from 'playcanvas'
 import type { CameraPose, ControlLimits } from './scene'
 
 export type DragAction = 'orbit' | 'pan' | null
+
+/** How the viewer just moved the camera */
+export type Move = 'orbit' | 'pan' | 'zoom'
 
 /** Decides what a pointer press does. Return null to leave the press to something else (a tool, a gizmo). */
 export type DragFilter = (e: PointerEvent) => DragAction
@@ -18,6 +21,12 @@ const KEY_ORBIT_STEP = 8 // degrees per arrow key press
 const WHEEL_SPEED = 0.0012
 const DAMPING = 0.09 // seconds for motion to settle to ~1/e
 const EPSILON = 1e-5
+// Straight up or down, a pose's position and target no longer say which way the camera is
+// turned, so poses are written from a hair short of the pole.
+const POLE = 89.9
+// An orthographic view is the same size from any distance, so its camera stands well back
+// and zooming in never puts the near side of the scene behind it.
+const ORTHO_STANDOFF = 200
 
 /**
  * Orbit / pan / zoom camera for an embedded canvas. Unlike a full-page viewer it has to be a
@@ -48,6 +57,8 @@ export class OrbitControls {
   dragFilter: DragFilter = defaultFilter
   /** Called whenever the viewer touches the controls */
   onInteract: (() => void) | null = null
+  /** Called when the viewer moves the camera, with how */
+  onMove: ((move: Move) => void) | null = null
 
   private readonly camera: Entity
   private readonly element: HTMLElement
@@ -91,7 +102,7 @@ export class OrbitControls {
   // ── poses ────────────────────────────────────────────────────────────────
 
   getPose(): CameraPose {
-    const p = this.positionFor(this.target, this.yaw, this.pitch, this.distance)
+    const p = this.positionFor(this.target, this.yaw, math.clamp(this.pitch, -POLE, POLE), this.distance)
     const round = (n: number) => Math.round(n * 1e4) / 1e4
     return {
       position: [round(p.x), round(p.y), round(p.z)],
@@ -116,6 +127,60 @@ export class OrbitControls {
     this.yaw = yaw
     if (!animate) this.snap()
     this.dirty = true
+  }
+
+  /** Turn to look at the target from a direction, the short way round. `animate` eases there. */
+  lookFrom(yaw: number, pitch: number, animate = true) {
+    this.yaw = this.current.yaw + ((((yaw - this.current.yaw) % 360) + 540) % 360) - 180
+    this.pitch = pitch
+    if (!animate) this.snap()
+    this.dirty = true
+  }
+
+  /** Degrees the camera still has to turn to face where it was last sent */
+  get turning() {
+    return Math.max(Math.abs(this.yaw - this.current.yaw), Math.abs(this.pitch - this.current.pitch))
+  }
+
+  /**
+   * Parallel projection, for an editor's axis views. The picture keeps the size it has at
+   * the target, so switching does not change the framing.
+   */
+  get orthographic() {
+    return this.camera.camera?.projection === PROJECTION_ORTHOGRAPHIC
+  }
+
+  set orthographic(on: boolean) {
+    const camera = this.camera.camera
+    if (!camera || this.orthographic === on) return
+    camera.projection = on ? PROJECTION_ORTHOGRAPHIC : PROJECTION_PERSPECTIVE
+    this.refresh()
+  }
+
+  /** Place the camera again without moving it: its lens or projection changed. */
+  refresh() {
+    this.apply()
+    this.dirty = true
+  }
+
+  // ── moving it from code, on the viewer's behalf (a navigation gizmo, shortcuts) ──
+
+  orbitBy(yaw: number, pitch: number) {
+    this.yaw += yaw
+    this.pitch += pitch
+    this.moved('orbit')
+  }
+
+  /** Multiply the distance: below 1 moves in */
+  zoomBy(factor: number) {
+    this.distance *= factor
+    this.moved('zoom')
+  }
+
+  /** Slide the view by CSS pixels, as a pan drag of that size would */
+  panBy(dx: number, dy: number) {
+    this.pan(dx, dy)
+    this.moved('pan')
   }
 
   /** Frame a sphere so it fills the view at the given vertical field of view. */
@@ -190,8 +255,15 @@ export class OrbitControls {
 
   private apply() {
     const c = this.current
+    const camera = this.camera.camera
+    let distance = c.distance
+    if (camera && camera.projection === PROJECTION_ORTHOGRAPHIC) {
+      // what a perspective view of the same lens shows at the target's depth
+      camera.orthoHeight = c.distance * Math.tan((camera.fov * math.DEG_TO_RAD) / 2)
+      distance = Math.max(distance, Math.min(ORTHO_STANDOFF, camera.farClip / 2))
+    }
     this.camera.setLocalEulerAngles(c.pitch, c.yaw, 0)
-    this.camera.setLocalPosition(this.positionFor(c.target, c.yaw, c.pitch, c.distance))
+    this.camera.setLocalPosition(this.positionFor(c.target, c.yaw, c.pitch, distance))
   }
 
   // ── input ────────────────────────────────────────────────────────────────
@@ -200,6 +272,12 @@ export class OrbitControls {
     this.idle = 0
     this.dirty = true
     this.onInteract?.()
+  }
+
+  private moved(move: Move) {
+    this.idle = 0
+    this.dirty = true
+    this.onMove?.(move)
   }
 
   private onPointerDown = (e: PointerEvent) => {
@@ -231,11 +309,14 @@ export class OrbitControls {
       if (this.pinch.distance > 0 && pinch.distance > 0) this.distance *= this.pinch.distance / pinch.distance
       this.pan(pinch.x - this.pinch.x, pinch.y - this.pinch.y)
       this.pinch = pinch
+      this.onMove?.('zoom')
     } else if (this.action === 'pan') {
       this.pan(dx, dy)
+      this.onMove?.('pan')
     } else if (this.action === 'orbit') {
       this.yaw -= dx * ORBIT_SPEED
       this.pitch -= dy * ORBIT_SPEED
+      if (dx !== 0 || dy !== 0) this.onMove?.('orbit')
     }
     this.touched()
   }
@@ -254,6 +335,7 @@ export class OrbitControls {
     // deltaMode 1 = lines (Firefox mouse wheels); normalise to roughly pixels
     const delta = e.deltaMode === 1 ? e.deltaY * 32 : e.deltaY
     this.distance *= Math.exp(math.clamp(delta, -400, 400) * WHEEL_SPEED)
+    this.onMove?.('zoom')
     this.touched()
   }
 
@@ -269,6 +351,7 @@ export class OrbitControls {
       default: return
     }
     e.preventDefault()
+    this.onMove?.(e.key.startsWith('Arrow') ? 'orbit' : 'zoom')
     this.touched()
   }
 

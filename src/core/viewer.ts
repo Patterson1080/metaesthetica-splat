@@ -260,6 +260,8 @@ export class SplatViewer {
 
   setFov(fov: number) {
     this.camera.camera!.fov = fov
+    // an orthographic view takes its size from the lens
+    if (this.controls.orthographic) this.controls.refresh()
     this.requestRender()
   }
 
@@ -381,8 +383,11 @@ export class SplatViewer {
     return { center: box.center.clone(), radius: Math.max(box.halfExtents.length(), 1e-3) }
   }
 
-  /** Point the camera at the scene from a three-quarter view. */
-  frameScene(animate = false) {
+  /**
+   * Point the camera at the scene from a three-quarter view, or with `keepDirection` from
+   * wherever it is looking now.
+   */
+  frameScene(animate = false, keepDirection = false) {
     const focus = this.getFocus()
     if (!focus) return
     const { clientWidth, clientHeight } = this.canvas
@@ -390,8 +395,10 @@ export class SplatViewer {
     // frame again once the canvas has a real shape
     this.framePending = clientWidth === 0 || clientHeight === 0
     const aspect = this.framePending ? 1 : clientWidth / clientHeight
-    this.controls.yaw = 30
-    this.controls.pitch = -18
+    if (!keepDirection) {
+      this.controls.yaw = 30
+      this.controls.pitch = -18
+    }
     // the trimmed box is tight around the subject; pull back a little for breathing room
     this.controls.frame(focus.center, focus.radius * 0.85, this.fov, aspect)
     if (!animate) this.controls.snap()

@@ -171,6 +171,8 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     return mark
   }
 
+  let trackCount = 0
+
   /** Rebuild the ruler and the rows from the editor's tracks. */
   function render() {
     const { animation } = editor
@@ -190,7 +192,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
       rows.replaceChildren(
         h('p', { class: 'tl-empty fine' },
           editor.doc
-            ? 'Nothing is animated yet. Move the playhead, then press K to key what you are editing (the splat, or the force or box you pressed Edit on), or Key camera to key the view. With Auto-key on, any change you make is keyed for you.'
+            ? 'Nothing is animated yet. Move the playhead, then click the diamond beside any property in the panel to key it here. K keys everything about what you are editing (the splat, or the force or box you pressed Edit on), and Key camera keys the view. With Auto-key on, any change you make is keyed for you.'
             : 'Open a splat to animate it.'),
       )
     } else {
@@ -214,6 +216,10 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
         }),
       )
     }
+
+    // a property keyed for the first time gets a new row at the bottom: show it
+    if (animation.tracks.length > trackCount && trackCount > 0) rows.lastElementChild?.scrollIntoView({ block: 'nearest' })
+    trackCount = animation.tracks.length
 
     setValue(duration, trim(animation.duration, 2))
     loop.checked = animation.loop !== false

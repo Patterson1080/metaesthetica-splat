@@ -1,30 +1,8 @@
+import { ANIMATABLE, targetOf } from '../core/animation'
 import { FORCE_DEFAULTS, FORCE_TYPES, drawsPoints, type Force, type ForceType, type SectionBox, type Vec3Tuple } from '../core/scene'
-import { button, field, group, h, icons, number, setValue, trim } from './dom'
+import { button, field, group, h, icons, number, setValue, trim, vec3Row } from './dom'
 import type { ActiveObject, Editor } from './editor'
-
-const AXES = ['X', 'Y', 'Z'] as const
-
-/** Three number inputs editing one vector. */
-function vec3Row(label: string, step: number, commit: (value: Vec3Tuple) => void) {
-  let current: Vec3Tuple = [0, 0, 0]
-  const inputs = AXES.map((axis, i) =>
-    number(
-      (value) => {
-        const next: Vec3Tuple = [...current]
-        next[i] = value
-        commit(next)
-      },
-      { step, title: `${label} ${axis}` },
-    ),
-  )
-  return {
-    node: field(label, ...inputs),
-    set(value: Vec3Tuple) {
-      current = value
-      inputs.forEach((input, i) => setValue(input, trim(value[i])))
-    },
-  }
-}
+import type { KeyToggles } from './key-toggle'
 
 interface ListOptions<T> {
   kind: ActiveObject['kind']
@@ -84,7 +62,7 @@ function objectList<T extends { name?: string; enabled?: boolean }>(editor: Edit
 }
 
 /** The groups for what lives in the scene besides the splat: section boxes, forces and labels, one list per tab. */
-export function buildScenePanels(editor: Editor) {
+export function buildScenePanels(editor: Editor, keys: KeyToggles) {
   // `editor.settings` is replaced whenever a file opens, so it is read fresh in every handler
 
   // ── section boxes ────────────────────────────────────────────────────────
@@ -108,6 +86,9 @@ export function buildScenePanels(editor: Editor) {
     position: vec3Row('Position', 0.1, (position) => editSection({ position })),
     rotation: vec3Row('Rotation', 5, (rotation) => editSection({ rotation })),
     size: vec3Row('Size', 0.1, (size) => editSection({ size: size.map((v) => Math.max(v, 0.001)) as Vec3Tuple })),
+  }
+  for (const prop of ANIMATABLE.section) {
+    keys.attach(sectionRows[prop].node, () => (activeSection() === null ? null : targetOf('section', prop, activeSection()!)))
   }
   // a box can stand for a component of the splat: its name becomes a title, this its description
   const boxLabel = h('input', { type: 'checkbox' })
@@ -146,10 +127,12 @@ export function buildScenePanels(editor: Editor) {
     h('div', { class: 'row' }, button('+ Keep box', () => editor.addSection('keep')), button('+ Cut box', () => editor.addSection('cut'))),
     noBox,
   )
+  const restRow = field('Opacity', restSlider, restValue)
+  keys.attach(restRow, () => 'rest.opacity')
   const restGroup = group(
     'Rest of the splat',
     { help: 'What the boxes leave out can stay faintly visible, or not be drawn at all. Delete the rest makes the cut permanent.' },
-    field('Opacity', restSlider, restValue),
+    restRow,
     h('div', { class: 'row' }, restHide, bake),
   )
 
@@ -174,6 +157,9 @@ export function buildScenePanels(editor: Editor) {
     position: vec3Row('Position', 0.1, (position) => editForce({ position })),
     rotation: vec3Row('Rotation', 5, (rotation) => editForce({ rotation })),
   }
+  const forceTarget = (prop: string) => () => (activeForce() === null ? null : targetOf('force', prop, activeForce()!))
+  keys.attach(forceVec.position.node, forceTarget('position'))
+  keys.attach(forceVec.rotation.node, forceTarget('rotation'))
 
   type NumericKey = 'radius' | 'strength' | 'amount' | 'cycle' | 'dotSize' | 'tint' | 'noise' | 'noiseScale' | 'lift' | 'pull'
   const params: { key: NumericKey; label: string; title: string; step: number; min?: number; max?: number; slider?: boolean; only?: ForceType; when?: (force: Force) => boolean }[] = [
@@ -201,6 +187,8 @@ export function buildScenePanels(editor: Editor) {
     }
     const label = h('span', {}, param.label)
     const node = h('label', { class: 'field', title: param.title }, label, h('div', { class: 'controls' }, input, param.slider ? output : null))
+    // every number a force has can be keyed except its travel time
+    if ((ANIMATABLE.force as readonly string[]).includes(param.key)) keys.attach(node, forceTarget(param.key))
     return { ...param, input, output, label, node }
   })
   const color = h('input', { type: 'color', title: 'Tint color for moving splats (only shows when Tint is above 0)' })
