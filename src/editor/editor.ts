@@ -189,6 +189,8 @@ const FORCE_COLOR = [0.85, 0.5, 1]
 const CAMERA_COLOR = [1, 0.78, 0.1]
 const PATH_STEPS = 96
 const KEY_MARK = 0.05
+/** How long the camera's marker is, as a share of the distance to what it is aimed at */
+const CAMERA_MARK = 0.16
 
 // the 12 edges of a unit cube, as index pairs into its 8 corners
 const BOX_CORNERS = [-0.5, 0.5].flatMap((x) => [-0.5, 0.5].flatMap((y) => [-0.5, 0.5].map((z) => new Vec3(x, y, z))))
@@ -263,7 +265,7 @@ export class Editor {
     controls.limits.maxPitch = 90
     this.nav = new ViewNavigation(viewer)
     this.nav.onChange = () => this.events.emit('view')
-    this.nav.onUserMove = () => (this.viewMovedAt = performance.now())
+    this.nav.onUserMove = () => this.viewMoved()
 
     this.selection = new SelectionTools(canvas, overlay)
     this.selection.onSelect = (test, mode) => this.selectOnScreen(test, mode)
@@ -812,27 +814,35 @@ export class Editor {
   setViewPose(patch: Partial<Pick<CameraPose, 'position' | 'target'>>) {
     this.viewer.controls.setPose({ ...this.viewer.controls.getPose(), ...patch })
     this.nav.leaveCamera()
-    this.viewMovedAt = performance.now()
+    this.viewMoved()
     this.viewer.requestRender()
     this.events.emit('view')
   }
 
   /**
-   * The viewer has finished moving the view. If the viewport is the animated camera, that
-   * move was a move of the camera: with Auto-key on it is keyed, as Blender keys a camera
-   * locked to the view; otherwise it will be gone at the next move of the playhead, which
-   * is worth saying once.
+   * The viewer moved the viewport camera by hand. While the viewport is looking through an
+   * animated camera, that has to mean one of two things, and it is Blender's answer to both:
+   * with Auto-key on, the camera goes along and the move is keyed once it comes to rest;
+   * otherwise the viewport leaves the camera and is free, so the view just set up stays put
+   * while the playhead is moved to wherever its key belongs.
    */
+  private viewMoved() {
+    if (!this.doc || this.rendering || !this.followCamera || !this.hasCameraKeys) return
+    if (this.autoKey && !this.playing) {
+      this.viewMovedAt = performance.now()
+      return
+    }
+    this.setFollowCamera(false)
+    this.events.emit('notice', 'Left the camera: the viewport is free. Shift+K keys the camera to this view; the camera button looks through it again.')
+  }
+
+  /** A move of the camera made with Auto-key on has come to rest: key it. */
   private viewSettled() {
     this.viewMovedAt = 0
-    if (!this.doc || this.playing || this.rendering || !this.followCamera || !this.hasCameraKeys) return
+    if (!this.doc || this.playing || this.rendering || !this.autoKey || !this.followCamera || !this.hasCameraKeys) return
     if (!VIEW_TARGETS.some((target) => this.keyState(target).changed)) return
-    if (this.autoKey) {
-      this.keyTargets('Key camera', VIEW_TARGETS)
-      this.events.emit('notice', `Auto-keyed the camera at ${this.formatTime()}`)
-    } else {
-      this.events.emit('notice', 'The camera is animated: this view lasts until the playhead moves. Shift+K keys it, and Auto-key keys every move.')
-    }
+    this.keyTargets('Key camera', VIEW_TARGETS)
+    this.events.emit('notice', `Auto-keyed the camera at ${this.formatTime()}`)
   }
 
   /** A frame is about to be drawn: tell the panels if the camera is somewhere new. */
@@ -1204,6 +1214,23 @@ export class Editor {
         const value = ref ? this.valueOf(ref) : null
         if (value !== null) insertKey(this.animation, target, this.time, value)
       }
+    })
+    // The camera was just keyed from this very view, so the viewport is looking through it
+    // again: scrubbing and playing now show the move, until the view is next moved by hand.
+    if (!this.followCamera && targets.some((target) => VIEW_TARGETS.includes(target))) this.setFollowCamera(true)
+  }
+
+  /**
+   * The keys that belong with one of the camera's. What the camera has at one time (where it
+   * stands, what it looks at, its lens) is one camera key, however many tracks it is spread
+   * over, so on the timeline it is selected, moved and deleted as one.
+   */
+  viewPartners(target: string, key: Keyframe): { target: string; key: Keyframe }[] {
+    const tracks = ANIMATABLE.camera.map((prop) => targetOf('camera', prop))
+    if (!tracks.includes(target)) return []
+    return tracks.filter((other) => other !== target).flatMap((other) => {
+      const partner = this.animation.tracks.find((track) => track.target === other)?.keys.find((candidate) => Math.abs(candidate.t - key.t) < SAME_TIME)
+      return partner ? [{ target: other, key: partner }] : []
     })
   }
 
@@ -1804,6 +1831,42 @@ export class Editor {
         segment(new Vec3().copy(center).sub(b.copy(up).mulScalar(force.radius)), new Vec3().copy(center).add(b.copy(up).mulScalar(force.radius * 1.25)), FORCE_COLOR, alpha)
       }
     })
+    // the animated camera itself, when the viewport is not looking through it: where it is
+    // at the playhead and what it is aimed at, so its move can be watched from outside
+    if (!this.followCamera && this.hasCameraKeys) {
+      const pose = this.viewer.controls.getPose()
+      const p = (sampleTarget(this.animation, 'camera.position', this.time) as number[] | null) ?? pose.position
+      const t = (sampleTarget(this.animation, 'camera.target', this.time) as number[] | null) ?? pose.target
+      const fov = (sampleTarget(this.animation, 'camera.fov', this.time) as number | null) ?? this.settings.fov
+      const eye = new Vec3(p[0], p[1], p[2])
+      const aim = new Vec3(t[0], t[1], t[2])
+      const reach = eye.distance(aim)
+      if (reach > 1e-6) {
+        const forward = new Vec3().sub2(aim, eye).normalize()
+        const right = new Vec3().cross(forward, Vec3.UP)
+        // looking straight up or down, any level direction will do for its right-hand side
+        if (right.length() < 1e-4) right.copy(Vec3.RIGHT)
+        right.normalize()
+        const up = new Vec3().cross(right, forward).normalize()
+        // a small pyramid: the lens at its tip, opening the way it looks, as wide as its field of view
+        const depth = reach * CAMERA_MARK
+        const halfH = depth * Math.tan((fov * Math.PI) / 360)
+        const halfW = halfH * (16 / 9)
+        const centre = new Vec3().copy(eye).add(b.copy(forward).mulScalar(depth))
+        const corner = (sx: number, sy: number) => new Vec3().copy(centre).add(b.copy(right).mulScalar(sx * halfW)).add(b.copy(up).mulScalar(sy * halfH))
+        const corners = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]
+        corners.forEach((c, i) => {
+          segment(eye, c, CAMERA_COLOR, 1)
+          segment(c, corners[(i + 1) % 4], CAMERA_COLOR, 1)
+        })
+        // a tab on the top edge says which way up it is
+        const tab = new Vec3().copy(centre).add(b.copy(up).mulScalar(halfH * 1.45))
+        segment(corner(-0.35, 1), tab, CAMERA_COLOR, 1)
+        segment(corner(0.35, 1), tab, CAMERA_COLOR, 1)
+        // and a faint line to the point it is aimed at
+        segment(centre, aim, CAMERA_COLOR, 0.35)
+      }
+    }
     // the animated camera's path, when the viewport is not riding along it
     const path = this.followCamera ? undefined : this.animation.tracks.find((track) => track.target === 'camera.position')
     if (path && path.keys.length > 1) {

@@ -121,8 +121,8 @@ Setting keys:
 
 - **The diamond beside a property** keys that property at the playhead, as in Blender's Properties editor. Every property in the table above has one at the end of its row. It also shows where the property stands: a dot for not animated, a hollow green diamond for animated with no key here, a filled yellow one for a key at the playhead (click it to remove that key), and orange when the value was changed by hand and no longer matches its animation (click to key the new value). The row's fields are tinted the same way.
 - **`K`** keys everything about what you are editing at the playhead: the force or box you pressed **Edit** on, otherwise the splat.
-- **Key camera** (`Shift+K`) keys the current view. Move the playhead, orbit to the next view, key again.
-- **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed. Once the camera has keys and the viewport looks through it, moving the view is keyed too, as Blender keys a camera locked to the view.
+- **Key camera** (`Shift+K`) keys the current view as the camera at the playhead. Set up a view and move the playhead to where it belongs, in either order, then key; repeat for the next view.
+- **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed. While the viewport is looking through a camera that has keys, moving the view moves the camera and is keyed too, as Blender keys a camera locked to the view.
 - Each row has its own add-key button; double-clicking an empty stretch of a row adds a key there.
 
 Working with keys:
@@ -139,7 +139,14 @@ As in Blender, an animated property shows its value at the playhead. If you chan
 
 **The camera.** A view is a place to look from and a point to look at, and the two are keyed together: either diamond in *Camera → Viewpoint* keys both. Between keys the camera does not slide along a straight line, which would dive toward the splat between two views of it and pass through it between opposite ones. It travels as an orbit around its target: heading, height and distance each ease from key to key, so views keyed at a steady distance stay at that distance. Each key is reached the short way round, so key a turn of more than half a revolution in two steps. The player flies the camera exactly as keyed, even where that lies outside the zoom and pitch limits set for viewers.
 
-**Through camera** makes the viewport look through the animated camera, so moving the view there is moving the camera: key it (`Shift+K`, a Viewpoint diamond, or Auto-key) or it is gone when the playhead moves, which the status bar says. Turn it off to move around freely while the animation plays; the camera's path is then drawn in the viewport, with a cross at each key.
+**Camera view and free view.** The viewport is in one of two states, as in Blender, and the corner of the viewport says which.
+
+- *Camera Perspective*: it looks through the animated camera, so scrubbing and playing show the move. **Through camera** in the timeline bar, the camera button under the gizmo and Numpad `0` switch it on and off.
+- Any other name: the viewport is free. The camera is drawn in yellow, as a small pyramid at the playhead aimed at its target, on its path with a cross at each key. Moving the playhead leaves your view alone.
+
+Moving the view by hand leaves the camera view, so a view you have just set up is never taken away by moving the playhead. Keying the camera returns to it, because the camera then is your view. The exception is Auto-key: while it is on, moving the view in camera view moves the camera instead of leaving it.
+
+On the timeline a camera key is one thing even though it sits on up to three tracks: selecting, moving or deleting its position key takes its target and field-of-view keys at that time with it.
 
 The animation is saved in the scene file and the player plays it. A force's travel time cannot be keyed: every moving splat's place along its path is derived from it, so changing it mid-flight would make the whole flow jump.
 

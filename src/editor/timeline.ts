@@ -92,7 +92,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     autoKey,
     keyObject,
     keyCamera,
-    h('label', { class: 'check', title: 'Look through the animated camera. Off leaves the viewport free and draws the camera’s path.' }, follow, 'Through camera'),
+    h('label', { class: 'check', title: 'Look through the animated camera. Moving the view by hand leaves it (with Auto-key on, it moves the camera instead); keying the camera returns to it. Outside it, the camera and its path are drawn in yellow.' }, follow, 'Through camera'),
     h('span', { class: 'spacer' }),
     ease,
     removeKey,
@@ -147,9 +147,21 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     syncSelection()
   }
 
+  /** Add a key to the selection, and with it the key that makes up the same camera view. */
+  function pick(key: Keyframe, target: string) {
+    selection.set(key, target)
+    for (const partner of editor.viewPartners(target, key)) selection.set(partner.key, partner.target)
+  }
+
+  function drop(key: Keyframe, target: string) {
+    selection.delete(key)
+    for (const partner of editor.viewPartners(target, key)) selection.delete(partner.key)
+  }
+
   function setSelection(keys: Iterable<[Keyframe, string]>) {
+    const next = [...keys]
     selection.clear()
-    for (const [key, target] of keys) selection.set(key, target)
+    for (const [key, target] of next) pick(key, target)
     paint()
   }
 
@@ -183,8 +195,8 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
       toggled = e.shiftKey || e.ctrlKey || e.metaKey
       if (toggled) {
         // add this key to the selection, or take it out
-        if (selection.has(key)) selection.delete(key)
-        else selection.set(key, target)
+        if (selection.has(key)) drop(key, target)
+        else pick(key, target)
         paint()
         // a key just deselected is not about to be dragged
         if (!selection.has(key)) return
@@ -284,7 +296,10 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
         const cx = rect.left + rect.width / 2
         const cy = rect.top + rect.height / 2
         if (cx < left || cx > right || cy < top || cy > bottom) continue
-        if (box.mode === 'remove') next.delete(key)
+        if (box.mode === 'remove') {
+          next.delete(key)
+          for (const partner of editor.viewPartners(track.target, key)) next.delete(partner.key)
+        }
         else next.set(key, track.target)
       }
     }
