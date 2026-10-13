@@ -31,6 +31,8 @@ const turn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) -
 export class ViewNavigation {
   /** The projection or the view's name changed */
   onChange: (() => void) | null = null
+  /** The viewer moved the viewport camera: by mouse, by the gizmo, or by a shortcut */
+  onUserMove: (() => void) | null = null
   /** The viewport is showing what the animated camera sees at the playhead */
   throughCamera = false
 
@@ -76,6 +78,7 @@ export class ViewNavigation {
     const { yaw, pitch } = AXIS_VIEWS[to]
     this.throughCamera = false
     this.viewer.controls.lookFrom(yaw, pitch)
+    this.onUserMove?.()
     if (!this.orthographic) {
       this.autoOrtho = true
       this.pendingOrtho = true
@@ -91,6 +94,7 @@ export class ViewNavigation {
     const { controls } = this.viewer
     this.throughCamera = false
     controls.lookFrom(controls.yaw + 180, -controls.pitch)
+    this.onUserMove?.()
     this.viewer.requestRender()
     this.onChange?.()
   }
@@ -172,6 +176,7 @@ export class ViewNavigation {
   }
 
   private moved(move: Move) {
+    this.onUserMove?.()
     const wasCamera = this.throughCamera
     this.throughCamera = false
     if (move === 'orbit') {

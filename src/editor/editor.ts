@@ -11,7 +11,7 @@ import {
   type GSplatData,
   type TransformGizmo,
 } from 'playcanvas'
-import { ANIMATABLE, SAME_TIME, constrain, dropTracksFor, evaluate, insertKey, parseTarget, readSceneValue, sampleTrack, targetOf, writeSceneValue, type AnimValue, type TargetRef } from '../core/animation'
+import { ANIMATABLE, SAME_TIME, constrain, dropTracksFor, evaluate, insertKey, parseTarget, readSceneValue, sampleTarget, targetOf, writeSceneValue, type AnimValue, type TargetRef } from '../core/animation'
 import { AnnotationLayer } from '../core/annotations'
 import { SectionFrameLayer } from '../core/section-frames'
 import { SplatEffects } from '../core/effects'
@@ -43,6 +43,7 @@ import {
 import { sectionTest } from '../core/sections'
 import { SplatViewer, nextTask, tupleOf, type DeviceType, type LoadedSplat, type SplatInput } from '../core/viewer'
 import { History, diffBytes } from './history'
+import { paintLabels } from './label-painter'
 import { exportPly } from './ply-export'
 import { SelectionTools, type ScreenTest, type SelectMode } from './selection'
 import { DELETED, SELECTED, SplatState } from './splat-state'
@@ -172,6 +173,14 @@ function sameValue(prop: string, a: AnimValue, b: AnimValue): boolean {
   return a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= SAME_VALUE * Math.max(1, Math.abs(v), Math.abs(b[i])))
 }
 
+// A view is a place to look from and a point to look at. Keyed apart they drift apart: a
+// place keyed without its target looks somewhere else as soon as the view is panned. So
+// the two are always keyed, and unkeyed, together.
+const VIEW_TARGETS = ['camera.position', 'camera.target']
+const linked = (target: string) => (VIEW_TARGETS.includes(target) ? VIEW_TARGETS : [target])
+/** How long the view must rest before a move of it counts as finished, in milliseconds */
+const VIEW_SETTLE = 350
+
 const stem = (filename: string) => filename.replace(/\.(compressed\.ply|ply|sog|json)$/i, '')
 const round = (n: number, digits = 3) => Math.round(n * 10 ** digits) / 10 ** digits
 
@@ -231,6 +240,8 @@ export class Editor {
   private culled: ((x: number, y: number, z: number) => boolean) | null = null
   private helpersHidden = false
   private pressed: { x: number; y: number } | null = null
+  /** When the viewer last moved the viewport camera, while that move still waits to be keyed or mentioned; 0 otherwise */
+  private viewMovedAt = 0
   /** Where the viewport camera was when the panels last heard about it */
   private viewSeen = ''
 
@@ -252,6 +263,7 @@ export class Editor {
     controls.limits.maxPitch = 90
     this.nav = new ViewNavigation(viewer)
     this.nav.onChange = () => this.events.emit('view')
+    this.nav.onUserMove = () => (this.viewMovedAt = performance.now())
 
     this.selection = new SelectionTools(canvas, overlay)
     this.selection.onSelect = (test, mode) => this.selectOnScreen(test, mode)
@@ -322,6 +334,7 @@ export class Editor {
 
     viewer.events.on('update', (dt) => {
       this.nav.update()
+      if (this.viewMovedAt && !controls.dragging && performance.now() - this.viewMovedAt > VIEW_SETTLE) this.viewSettled()
       if (this.playing && !this.rendering) this.stepPlayback(dt)
       if (this.doc?.effects.advance(dt)) viewer.requestRender()
       this.callouts.update()
@@ -799,8 +812,27 @@ export class Editor {
   setViewPose(patch: Partial<Pick<CameraPose, 'position' | 'target'>>) {
     this.viewer.controls.setPose({ ...this.viewer.controls.getPose(), ...patch })
     this.nav.leaveCamera()
+    this.viewMovedAt = performance.now()
     this.viewer.requestRender()
     this.events.emit('view')
+  }
+
+  /**
+   * The viewer has finished moving the view. If the viewport is the animated camera, that
+   * move was a move of the camera: with Auto-key on it is keyed, as Blender keys a camera
+   * locked to the view; otherwise it will be gone at the next move of the playhead, which
+   * is worth saying once.
+   */
+  private viewSettled() {
+    this.viewMovedAt = 0
+    if (!this.doc || this.playing || this.rendering || !this.followCamera || !this.hasCameraKeys) return
+    if (!VIEW_TARGETS.some((target) => this.keyState(target).changed)) return
+    if (this.autoKey) {
+      this.keyTargets('Key camera', VIEW_TARGETS)
+      this.events.emit('notice', `Auto-keyed the camera at ${this.formatTime()}`)
+    } else {
+      this.events.emit('notice', 'The camera is animated: this view lasts until the playhead moves. Shift+K keys it, and Auto-key keys every move.')
+    }
   }
 
   /** A frame is about to be drawn: tell the panels if the camera is somewhere new. */
@@ -1034,6 +1066,9 @@ export class Editor {
 
   /** Move the playhead and put everything animated where it is at that time. */
   setTime(t: number) {
+    // a move of the camera still waiting to be auto-keyed belongs to the time it was made at
+    if (this.viewMovedAt && this.autoKey) this.viewSettled()
+    this.viewMovedAt = 0
     this.time = Math.min(Math.max(round(t, 4), 0), this.animation.duration)
     this.applyTime()
     this.events.emit('time')
@@ -1041,6 +1076,7 @@ export class Editor {
 
   play() {
     if (!this.doc || this.playing) return
+    if (this.viewMovedAt && this.autoKey) this.viewSettled()
     // pressing play at the end starts over, as it does everywhere
     if (this.time >= this.animation.duration - 1e-3) this.time = 0
     this.playing = true
@@ -1188,16 +1224,29 @@ export class Editor {
 
   /** Add a key to one track at the playhead, with the value it has there. */
   keyTrack(target: string) {
-    this.keyTargets('Add key', [target])
+    this.keyTargets('Add key', linked(target))
   }
 
-  /** How a property stands on the timeline at the playhead. */
+  /**
+   * How a property stands on the timeline at the playhead. The camera's position and target
+   * are one view, so they answer as one: both diamonds always show the same.
+   */
   keyState(target: string): KeyState {
+    const states = linked(target).map((one) => this.trackState(one))
+    const animated = states.filter((state) => state.animated)
+    return {
+      animated: animated.length > 0,
+      onKey: animated.length > 0 && animated.every((state) => state.onKey),
+      changed: animated.some((state) => state.changed),
+    }
+  }
+
+  private trackState(target: string): KeyState {
     const track = this.animation.tracks.find((candidate) => candidate.target === target)
     const ref = parseTarget(target)
     if (!this.doc || !track || !ref || track.keys.length === 0) return { animated: false, onKey: false, changed: false }
     const now = this.valueOf(ref)
-    const then = sampleTrack(track, this.time)
+    const then = sampleTarget(this.animation, target, this.time)
     return {
       animated: true,
       onKey: track.keys.some((key) => Math.abs(key.t - this.time) < SAME_TIME),
@@ -1213,15 +1262,18 @@ export class Editor {
     if (!this.doc) return
     const state = this.keyState(target)
     const at = this.formatTime()
+    const targets = linked(target)
+    const what = targets.length > 1 ? 'the camera’s view' : this.trackLabel(target)
     if (state.onKey && !state.changed) {
-      const track = this.animation.tracks.find((candidate) => candidate.target === target)
-      const key = track?.keys.find((candidate) => Math.abs(candidate.t - this.time) < SAME_TIME)
-      if (!key) return
-      this.removeKey(target, key)
-      this.events.emit('notice', `Removed the key on ${this.trackLabel(target)} at ${at}`)
+      const keys = targets.flatMap((one) => {
+        const key = this.animation.tracks.find((candidate) => candidate.target === one)?.keys.find((candidate) => Math.abs(candidate.t - this.time) < SAME_TIME)
+        return key ? [{ target: one, key }] : []
+      })
+      this.removeKeys(keys)
+      this.events.emit('notice', `Removed the key on ${what} at ${at}`)
     } else {
-      this.keyTargets('Add key', [target])
-      this.events.emit('notice', `Keyed ${this.trackLabel(target)} at ${at}`)
+      this.keyTargets('Add key', targets)
+      this.events.emit('notice', `Keyed ${what} at ${at}`)
     }
   }
 
@@ -1570,7 +1622,7 @@ export class Editor {
    * machine as on a fast one. The view is the animated camera's; without camera keys it is
    * wherever the viewport camera is.
    */
-  async renderVideo(options: { width: number; height: number; fps: number; quality: 'high' | 'max'; onProgress?: (fraction: number) => void; signal?: AbortSignal }): Promise<Blob> {
+  async renderVideo(options: { width: number; height: number; fps: number; quality: 'high' | 'max'; labels?: boolean; onProgress?: (fraction: number) => void; signal?: AbortSignal }): Promise<Blob> {
     if (!this.doc) throw new Error('Nothing to render')
     if (this.rendering) throw new Error('A render is already running')
     // loaded on demand: the encoder is only needed by whoever renders a video
@@ -1596,10 +1648,14 @@ export class Editor {
 
     try {
       return await this.withCleanView(async () => {
+        // Labels are HTML over the canvas, so a frame with labels is put together on a second
+        // canvas: the rendered picture, then the labels drawn over it. They are sized against
+        // the viewport, so they fill the same share of the video as they do on screen.
+        const compose = options.labels && this.hasLabels ? this.labelComposer(width, height) : null
         this.viewer.beginOffline(width, height)
         const target = new BufferTarget()
         const output = new Output({ format: new Mp4OutputFormat(), target })
-        const source = new CanvasSource(this.viewer.canvas, { codec: 'avc', quality })
+        const source = new CanvasSource(compose?.canvas ?? this.viewer.canvas, { codec: 'avc', quality })
         output.addVideoTrack(source, { frameRate: fps })
         await output.start()
         try {
@@ -1610,6 +1666,7 @@ export class Editor {
             this.applyTime()
             await this.viewer.stepFrame(clock + (i * 1000) / fps)
             // the canvas is read here, in the same task that drew it
+            compose?.draw()
             await source.add(i / fps, 1 / fps)
             options.onProgress?.((i + 1) / frames)
             // let the page paint the progress now and then
@@ -1638,6 +1695,37 @@ export class Editor {
       }
       this.setTime(resumeAt)
       this.afterPlayback()
+    }
+  }
+
+  /** Whether the scene has any label a video could show: a pinned one, or a labelled box */
+  get hasLabels() {
+    const { annotations, sections } = this.settings
+    return annotations.some((a) => a.title || a.text) || sections.some((box) => box.label === true && box.enabled !== false)
+  }
+
+  /** A canvas the size of a video frame, and a function that fills it with the rendered picture and the labels over it. */
+  private labelComposer(width: number, height: number) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d', { alpha: false })
+    if (!ctx) throw new Error('This browser could not make a canvas to draw the labels on')
+    // the labels as the page styles them: its typeface and color, haloed in the stage color
+    const computed = getComputedStyle(this.callouts.root)
+    const style = { color: computed.color || '#fff', font: computed.fontFamily || 'sans-serif', halo: this.settings.background ?? '#000' }
+    const scale = height / Math.max(this.viewer.canvas.clientHeight, 1)
+    return {
+      canvas,
+      draw: () => {
+        const { annotations, sections, sectionRest } = this.settings
+        ctx.fillStyle = style.halo
+        ctx.fillRect(0, 0, width, height)
+        ctx.drawImage(this.viewer.canvas, 0, 0, width, height)
+        // a label whose point is cut away (not merely faded) goes with it, as in the player
+        const culled = restOpacity(sectionRest) > 0 ? null : sectionTest(sections)
+        paintLabels(ctx, width, height, scale, { camera: this.viewer.camera, annotations, culled, sections }, style)
+      },
     }
   }
 
@@ -1721,8 +1809,9 @@ export class Editor {
     if (path && path.keys.length > 1) {
       const from = path.keys[0].t
       const to = path.keys[path.keys.length - 1].t
+      // the path as playback will fly it: an arc around the target, not a chord
       const at = (t: number) => {
-        const v = sampleTrack(path, t) as number[]
+        const v = sampleTarget(this.animation, 'camera.position', t) as number[]
         return new Vec3(v[0], v[1], v[2])
       }
       let previous = at(from)

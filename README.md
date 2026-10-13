@@ -121,8 +121,8 @@ Setting keys:
 
 - **The diamond beside a property** keys that property at the playhead, as in Blender's Properties editor. Every property in the table above has one at the end of its row. It also shows where the property stands: a dot for not animated, a hollow green diamond for animated with no key here, a filled yellow one for a key at the playhead (click it to remove that key), and orange when the value was changed by hand and no longer matches its animation (click to key the new value). The row's fields are tinted the same way.
 - **`K`** keys everything about what you are editing at the playhead: the force or box you pressed **Edit** on, otherwise the splat.
-- **Key camera** (`Shift+K`) keys the current view. Move the playhead, orbit to the next view, key again: the camera travels between them on a smooth path.
-- **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed.
+- **Key camera** (`Shift+K`) keys the current view. Move the playhead, orbit to the next view, key again.
+- **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed. Once the camera has keys and the viewport looks through it, moving the view is keyed too, as Blender keys a camera locked to the view.
 - Each row has its own add-key button; double-clicking an empty stretch of a row adds a key there.
 
 Working with keys:
@@ -135,7 +135,11 @@ Drag the **ruler** to scrub; the tracks under it are for selecting. Everything o
 
 As in Blender, an animated property shows its value at the playhead. If you change one without keying it, the change lasts until the playhead moves; the status bar says so when it happens.
 
-**Through camera** makes the viewport look through the animated camera. Turn it off to move around freely while the animation plays; the camera's path is then drawn in the viewport, with a cross at each key.
+**How values travel between keys.** Smooth keys follow a curve that never swings past them: a value levels off at a peak or a dip, and two equal keys in a row hold still between them, as Blender's auto-clamped handles do. The first and last keys ease in and out. In a looping animation, a track whose last key (at the very end) repeats its first (at 0) is treated as one cycle, so the loop turns over without a pause.
+
+**The camera.** A view is a place to look from and a point to look at, and the two are keyed together: either diamond in *Camera → Viewpoint* keys both. Between keys the camera does not slide along a straight line, which would dive toward the splat between two views of it and pass through it between opposite ones. It travels as an orbit around its target: heading, height and distance each ease from key to key, so views keyed at a steady distance stay at that distance. Each key is reached the short way round, so key a turn of more than half a revolution in two steps. The player flies the camera exactly as keyed, even where that lies outside the zoom and pitch limits set for viewers.
+
+**Through camera** makes the viewport look through the animated camera, so moving the view there is moving the camera: key it (`Shift+K`, a Viewpoint diamond, or Auto-key) or it is gone when the playhead moves, which the status bar says. Turn it off to move around freely while the animation plays; the camera's path is then drawn in the viewport, with a cross at each key.
 
 The animation is saved in the scene file and the player plays it. A force's travel time cannot be keyed: every moving splat's place along its path is derived from it, so changing it mid-flight would make the whole flow jump.
 
@@ -143,11 +147,11 @@ The animation is saved in the scene file and the player plays it. A force's trav
 
 **Export → Video → Render video (.mp4)** renders the whole timeline, start to end, to an H.264 `.mp4`. Choose a size (720p up to 4K, square or vertical), a frame rate and a quality. The frame rate is the timeline's own: changing it in either place changes it in both.
 
-It is a true offline render, not a screen recording: the timeline is stepped one frame at a time at exactly the chosen rate, each frame waits for its depth sort before it is taken, and the canvas is rendered at the chosen size whatever the size of your window. The picture is the animated camera's view; if the camera has no keys, it is wherever the viewport camera is. The grid, gizmos, box outlines and selection highlight are left out. Forces run on the same stepped clock, so the flow is smooth at any frame rate.
+It is a true offline render, not a screen recording: the timeline is stepped one frame at a time at exactly the chosen rate, each frame waits for its depth sort before it is taken, and the canvas is rendered at the chosen size whatever the size of your window. The picture is the animated camera's view; if the camera has no keys, it is wherever the viewport camera is. The grid, gizmos, box outlines and selection highlight are left out. With **Include labels** ticked, pinned labels and labelled boxes (outline, name and description) are drawn into every frame. Forces run on the same stepped clock, so the flow is smooth at any frame rate.
 
 Things to know:
 
-- **Labels are not in the video.** Pinned labels and box labels are HTML drawn by the page over the canvas, and the render captures the canvas.
+- **Labels are redrawn for the video.** On the page they are HTML over the canvas, which a video cannot hold, so the render draws the same labels into the picture: same typeface, layout and halo. They are sized against the viewport, so they take up the same share of the frame as they do on screen; a taller editor window therefore gives smaller labels in the video.
 - The output's shape is the size you choose, not your viewport's, so a vertical render frames the scene differently from what a wide window shows. The vertical field of view is what stays fixed.
 - It needs a browser that can encode H.264 through WebCodecs: current Chrome or Edge. The button reports it if the browser cannot.
 - For forces, render with the editor on WebGPU (`?device=webgpu`), for the same depth-ordering reason as in the player.

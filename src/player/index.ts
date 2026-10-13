@@ -587,10 +587,15 @@ export class SplatPlayer {
     }
     if (camera.position || camera.target) {
       const pose = viewer.controls.getPose()
-      viewer.controls.setPose({
-        position: (camera.position as Vec3Tuple | undefined) ?? pose.position,
-        target: (camera.target as Vec3Tuple | undefined) ?? pose.target,
-      })
+      // as keyed, even beyond the orbit limits: those bind the viewer, not the animation
+      viewer.controls.setPose(
+        {
+          position: (camera.position as Vec3Tuple | undefined) ?? pose.position,
+          target: (camera.target as Vec3Tuple | undefined) ?? pose.target,
+        },
+        false,
+        false,
+      )
     }
     if (camera.fov !== undefined) viewer.setFov(camera.fov)
     viewer.requestRender(2)

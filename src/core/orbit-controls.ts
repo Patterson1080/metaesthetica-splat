@@ -68,6 +68,8 @@ export class OrbitControls {
   private pinch = { distance: 0, x: 0, y: 0 }
   private idle = 0
   private dirty = true
+  /** The pose came from an animation: the limits do not apply to it */
+  private unbound = false
   private readonly abort = new AbortController()
 
   constructor(camera: Entity, element: HTMLElement) {
@@ -110,8 +112,14 @@ export class OrbitControls {
     }
   }
 
-  /** Aim the camera from `position` at `target`; `animate` eases there instead of cutting. */
-  setPose(pose: CameraPose, animate = false) {
+  /**
+   * Aim the camera from `position` at `target`; `animate` eases there instead of cutting.
+   * With `bound` false the pose is taken as given even where it lies outside the limits:
+   * those say how far the viewer may go, not where an animated camera may be. It holds
+   * until the viewer next moves the camera.
+   */
+  setPose(pose: CameraPose, animate = false, bound = true) {
+    this.unbound = !bound
     const dir = new Vec3(
       pose.position[0] - pose.target[0],
       pose.position[1] - pose.target[1],
@@ -238,6 +246,10 @@ export class OrbitControls {
 
   private clamp() {
     const l = this.limits
+    if (this.unbound) {
+      this.pitch = math.clamp(this.pitch, -90, 90)
+      return
+    }
     this.pitch = math.clamp(this.pitch, l.minPitch, l.maxPitch)
     this.distance = math.clamp(this.distance, l.minDistance, l.maxDistance)
   }
@@ -271,12 +283,14 @@ export class OrbitControls {
   private touched() {
     this.idle = 0
     this.dirty = true
+    this.unbound = false
     this.onInteract?.()
   }
 
   private moved(move: Move) {
     this.idle = 0
     this.dirty = true
+    this.unbound = false
     this.onMove?.(move)
   }
 

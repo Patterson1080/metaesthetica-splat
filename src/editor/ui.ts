@@ -367,6 +367,7 @@ export function bindUi(shell: Shell, editor: Editor) {
     videoFps.value = String(editor.fps)
   }
   const videoQuality = h('select', {}, option('high', 'High'), option('max', 'Very high (larger file)'))
+  const videoLabels = h('input', { type: 'checkbox', checked: true })
   let renderAbort: AbortController | null = null
   const renderButton = button('Render video (.mp4)', () => {
     if (renderAbort) return renderAbort.abort()
@@ -382,6 +383,7 @@ export function bindUi(shell: Shell, editor: Editor) {
           height,
           fps,
           quality: videoQuality.value as 'high' | 'max',
+          labels: videoLabels.checked,
           signal: renderAbort.signal,
           onProgress: (fraction) => (shell.busy.textContent = `Rendering video… ${Math.round(fraction * 100)}%`),
         })
@@ -429,10 +431,11 @@ export function bindUi(shell: Shell, editor: Editor) {
   )
   const videoGroup = group(
     'Video',
-    { help: 'Renders the whole timeline to an .mp4, frame by frame, through the animated camera (or the current view, if the camera has no keys). Labels are not part of the picture: they are drawn by the page, over the canvas.' },
+    { help: 'Renders the whole timeline to an .mp4, frame by frame, through the animated camera (or the current view, if the camera has no keys). With Include labels, pinned labels and labelled boxes are drawn into the picture, the size they are in the viewport.' },
     field('Size', videoSize),
     field('Frame rate', videoFps),
     field('Quality', videoQuality),
+    h('label', { class: 'check', title: 'Draw the scene’s labels into the video: pinned labels, and the outlines, names and descriptions of labelled boxes' }, videoLabels, 'Include labels'),
     h('div', { class: 'column' }, renderButton),
   )
 
