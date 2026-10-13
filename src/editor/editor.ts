@@ -21,6 +21,7 @@ import {
   DEFAULT_BACKGROUND,
   DEFAULT_DURATION,
   DEFAULT_FOV,
+  DEFAULT_FPS,
   DEFAULT_REST_OPACITY,
   DEFAULT_ROTATION,
   FORCE_DEFAULTS,
@@ -210,6 +211,8 @@ export class Editor {
   /** The playhead, in seconds */
   time = 0
   playing = false
+  /** What the timeline counts in. Either way, times are kept in seconds. */
+  timeUnits: 'seconds' | 'frames' = 'seconds'
   /** Write a key whenever an animatable property is changed */
   autoKey = false
   /** Look through the animated camera; off leaves the viewport free and draws the camera's path */
@@ -995,9 +998,43 @@ export class Editor {
     return this.settings.animation
   }
 
+  /** Frames per second of the timeline and of a rendered video */
+  get fps() {
+    return this.animation.fps ?? DEFAULT_FPS
+  }
+
+  setFps(fps: number) {
+    if (!Number.isFinite(fps)) return
+    // keys keep their times in seconds, so the motion does not change speed: only the count of frames does
+    this.editScene('Change frame rate', () => {
+      this.animation.fps = Math.min(Math.max(round(fps), 1), 240)
+    })
+  }
+
+  /** Show the timeline in seconds or in frames. */
+  setTimeUnits(units: 'seconds' | 'frames') {
+    if (this.timeUnits === units) return
+    this.timeUnits = units
+    // counted in frames, the playhead sits on one
+    if (units === 'frames' && !this.playing) this.time = this.onFrame(this.time)
+    this.applyTime()
+    this.events.emit('animation')
+    this.events.emit('time')
+  }
+
+  /** The time of the frame nearest to `t` */
+  private onFrame(t: number) {
+    return Math.min(round(Math.round(t * this.fps) / this.fps, 4), this.animation.duration)
+  }
+
+  /** A time the way the timeline is showing it: "3.00 s" or "frame 72" */
+  formatTime(t = this.time) {
+    return this.timeUnits === 'frames' ? `frame ${Math.round(t * this.fps)}` : `${t.toFixed(2)} s`
+  }
+
   /** Move the playhead and put everything animated where it is at that time. */
   setTime(t: number) {
-    this.time = Math.min(Math.max(round(t), 0), this.animation.duration)
+    this.time = Math.min(Math.max(round(t, 4), 0), this.animation.duration)
     this.applyTime()
     this.events.emit('time')
   }
@@ -1013,7 +1050,7 @@ export class Editor {
   pause() {
     if (!this.playing) return
     this.playing = false
-    this.time = round(this.time)
+    this.time = this.timeUnits === 'frames' ? this.onFrame(this.time) : round(this.time)
     this.afterPlayback()
   }
 
@@ -1140,13 +1177,13 @@ export class Editor {
     const kind = active?.kind ?? 'splat'
     const name = active ? (active.kind === 'force' ? this.settings.forces : this.settings.sections)[active.index]?.name || kind : 'the splat'
     this.keyTargets('Add keys', ANIMATABLE[kind].map((prop) => targetOf(kind, prop, active?.index)))
-    this.events.emit('notice', `Keyed ${name} at ${this.time.toFixed(2)} s`)
+    this.events.emit('notice', `Keyed ${name} at ${this.formatTime()}`)
   }
 
   /** Key the view: where the viewport camera is now becomes where the animated camera is at this time. */
   keyCamera() {
     this.keyTargets('Key camera', ANIMATABLE.camera.map((prop) => targetOf('camera', prop)))
-    this.events.emit('notice', `Keyed the camera at ${this.time.toFixed(2)} s`)
+    this.events.emit('notice', `Keyed the camera at ${this.formatTime()}`)
   }
 
   /** Add a key to one track at the playhead, with the value it has there. */
@@ -1175,7 +1212,7 @@ export class Editor {
   toggleKey(target: string) {
     if (!this.doc) return
     const state = this.keyState(target)
-    const at = `${this.time.toFixed(2)} s`
+    const at = this.formatTime()
     if (state.onKey && !state.changed) {
       const track = this.animation.tracks.find((candidate) => candidate.target === target)
       const key = track?.keys.find((candidate) => Math.abs(candidate.t - this.time) < SAME_TIME)
@@ -1196,7 +1233,7 @@ export class Editor {
   moveKey(target: string, key: Keyframe, t: number) {
     const track = this.animation.tracks.find((candidate) => candidate.target === target)
     if (!track) return
-    key.t = Math.min(Math.max(round(t), 0), this.animation.duration)
+    key.t = Math.min(Math.max(round(t, 4), 0), this.animation.duration)
     track.keys.sort((a, b) => a.t - b.t)
     this.applyTime()
   }
@@ -1229,7 +1266,8 @@ export class Editor {
 
   setDuration(seconds: number) {
     this.editScene('Change animation length', () => {
-      this.animation.duration = Math.max(round(seconds, 2), 0.5)
+      // four places, so a length given in frames survives the trip through seconds
+      this.animation.duration = Math.max(round(seconds, 4), 0.1)
     })
     if (this.time > this.animation.duration) this.setTime(this.animation.duration)
   }

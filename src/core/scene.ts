@@ -152,6 +152,12 @@ export interface Track {
 export interface Animation {
   /** Length in seconds */
   duration: number
+  /**
+   * Frames per second: what the editor's timeline counts in when it shows frames, and the
+   * rate of a rendered video. Times are stored in seconds whatever this is, so the player
+   * does not need it. Default 24.
+   */
+  fps?: number
   /** Start again at the end. Default true. */
   loop?: boolean
   /** Start playing as soon as the scene is shown. Default true. */
@@ -288,6 +294,7 @@ function parseRest(v: unknown): SectionRest {
 export const restOpacity = (rest: SectionRest | undefined) => (!rest || rest.hidden ? 0 : rest.opacity)
 
 export const DEFAULT_DURATION = 10
+export const DEFAULT_FPS = 24
 
 function parseAnimation(v: unknown): Animation | undefined {
   if (typeof v !== 'object' || v === null) return undefined
@@ -310,6 +317,7 @@ function parseAnimation(v: unknown): Animation | undefined {
   if (tracks.length === 0) return undefined
   return {
     duration: finite(a.duration) && a.duration > 0 ? a.duration : DEFAULT_DURATION,
+    ...(finite(a.fps) && a.fps > 0 ? { fps: a.fps } : {}),
     loop: a.loop !== false,
     autoplay: a.autoplay !== false,
     tracks,

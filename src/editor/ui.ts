@@ -358,15 +358,21 @@ export function bindUi(shell: Shell, editor: Editor) {
     option('1080x1920', '1080 × 1920 (vertical)'),
   )
   videoSize.value = '1920x1080'
-  const videoFps = h('select', {}, option('24', '24 fps'), option('30', '30 fps'), option('60', '60 fps'))
-  videoFps.value = '30'
+  // one frame rate for the timeline and for the video rendered from it
+  const videoFps = h('select', { title: 'Frames per second. This is the timeline’s frame rate: changing it here changes it there.' })
+  videoFps.addEventListener('change', () => editor.setFps(Number(videoFps.value)))
+  const syncVideoFps = () => {
+    const rates = [...new Set([24, 25, 30, 50, 60, editor.fps])].sort((a, b) => a - b)
+    videoFps.replaceChildren(...rates.map((rate) => option(String(rate), `${trim(rate, 3)} fps`)))
+    videoFps.value = String(editor.fps)
+  }
   const videoQuality = h('select', {}, option('high', 'High'), option('max', 'Very high (larger file)'))
   let renderAbort: AbortController | null = null
   const renderButton = button('Render video (.mp4)', () => {
     if (renderAbort) return renderAbort.abort()
     void run(async () => {
       const [width, height] = videoSize.value.split('x').map(Number)
-      const fps = Number(videoFps.value)
+      const { fps } = editor
       renderAbort = new AbortController()
       renderButton.textContent = 'Cancel render'
       shell.busy.hidden = false
@@ -380,7 +386,8 @@ export function bindUi(shell: Shell, editor: Editor) {
           onProgress: (fraction) => (shell.busy.textContent = `Rendering video… ${Math.round(fraction * 100)}%`),
         })
         download(blob, `${baseName()}.mp4`)
-        notice(`Rendered ${baseName()}.mp4: ${editor.animation.duration} s at ${width}×${height}, ${fps} fps, ${(blob.size / 1048576).toFixed(1)} MB`)
+        const frames = Math.max(1, Math.round(editor.animation.duration * fps))
+        notice(`Rendered ${baseName()}.mp4: ${frames} frames (${trim(editor.animation.duration, 2)} s) at ${width}×${height}, ${trim(fps, 3)} fps, ${(blob.size / 1048576).toFixed(1)} MB`)
       } catch (error) {
         // cancelling is not a failure
         if (!(error instanceof DOMException && error.name === 'AbortError')) throw error
@@ -613,6 +620,8 @@ export function bindUi(shell: Shell, editor: Editor) {
   editor.events.on('tool', syncTool)
   editor.events.on('history', syncHistory)
   editor.events.on('view', syncView)
+  editor.events.on('animation', syncVideoFps)
+  syncVideoFps()
   for (const event of ['doc', 'animation', 'scene', 'transform', 'settings'] as const) editor.events.on(event, syncKeys)
   editor.events.on('time', () => {
     if (editor.playing) return

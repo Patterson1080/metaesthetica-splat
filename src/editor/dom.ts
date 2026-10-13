@@ -177,6 +177,7 @@ export const icons = {
   toStart: svgIcon('<path d="M6 5v14"/><path d="M19 5l-9 7 9 7z"/>'),
   record: svgIcon('<circle cx="12" cy="12" r="5" fill="currentColor"/>'),
   diamond: svgIcon('<path d="M12 5l7 7-7 7-7-7z"/>'),
+  trash: svgIcon('<path d="M5 7h14M10 7V4.5h4V7M7 7l.8 12.5h8.4L17 7M10.3 10.5v6M13.7 10.5v6"/>'),
   chevron: svgIcon('<path d="M9 6l6 6-6 6"/>'),
   // the viewport's navigation buttons
   zoom: svgIcon('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/>'),

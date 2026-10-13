@@ -1,17 +1,15 @@
 import type { Keyframe } from '../core/scene'
-import { button, h, icons, number, setValue, trim } from './dom'
+import { button, h, icons, number, recall, remember, setValue, trim } from './dom'
 import type { Editor } from './editor'
 
-/** Keys snap to this grid while dragged, in seconds. Hold Shift to place freely. */
+/** Counted in seconds, keys snap to this grid while dragged. Counted in frames, they snap to frames. Hold Shift to place freely. */
 const SNAP = 0.05
 const DRAG_SLOP = 3
 
-const niceStep = (duration: number) => {
-  // about ten labelled ticks, on a round number of seconds
-  const raw = duration / 10
-  const steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60]
-  return steps.find((step) => step >= raw) ?? 60
-}
+const SECOND_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600]
+const FRAME_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000]
+/** About ten labelled ticks, on a round number of seconds or frames */
+const niceStep = (length: number, steps: number[]) => steps.find((step) => step >= length / 10) ?? steps[steps.length - 1]
 
 /**
  * The timeline dock: transport, a ruler with the playhead, and one row per animated
@@ -25,8 +23,27 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
 
   const play = button('Play', () => editor.togglePlay(), { icon: icons.play, title: 'Play / pause (Space)' })
   const toStart = button('To start', () => editor.setTime(0), { icon: icons.toStart, title: 'Back to the start (Home)' })
-  const time = number((value) => editor.setTime(value), { step: SNAP, min: 0, title: 'Playhead, in seconds' })
-  const duration = number((value) => editor.setDuration(value), { step: 1, min: 0.5, title: 'Length of the animation, in seconds' })
+  // times are kept in seconds; the timeline can count them in frames instead, as Blender's does
+  const inFrames = () => editor.timeUnits === 'frames'
+  const toUnits = (t: number) => (inFrames() ? Math.round(t * editor.fps) : t)
+  const fromUnits = (value: number) => (inFrames() ? value / editor.fps : value)
+  const snap = (t: number) => {
+    const step = inFrames() ? 1 / editor.fps : SNAP
+    return Math.round(t / step) * step
+  }
+  const stamp = (t: number) => (inFrames() ? `Frame ${toUnits(t)}` : `${trim(t, 2)} s`)
+
+  const time = number((value) => editor.setTime(fromUnits(value)), { step: SNAP, min: 0 })
+  const duration = number((value) => editor.setDuration(fromUnits(value)), { step: 1, min: 0 })
+  const timeCaption = h('span', {})
+  const units = h('select', { title: 'Count the timeline in seconds or in frames' }, h('option', { value: 'seconds' }, 'Seconds'), h('option', { value: 'frames' }, 'Frames'))
+  units.setAttribute('aria-label', 'Timeline units')
+  units.addEventListener('change', () => {
+    remember('timeUnits', units.value)
+    editor.setTimeUnits(units.value as 'seconds' | 'frames')
+  })
+  const fps = number((value) => editor.setFps(value), { step: 1, min: 1, max: 240, title: 'Frames per second: what a frame is worth, and the rate of a rendered video. Changing it does not change how long anything takes.' })
+  editor.timeUnits = recall<string>('timeUnits', 'seconds') === 'frames' ? 'frames' : 'seconds'
   const loop = h('input', { type: 'checkbox' })
   loop.addEventListener('change', () => editor.setLoop(loop.checked))
 
@@ -44,7 +61,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   const follow = h('input', { type: 'checkbox' })
   follow.addEventListener('change', () => editor.setFollowCamera(follow.checked))
 
-  const ease = h('select', { title: 'How the selected key travels to the next one' },
+  const ease = h('select', { title: 'How the selected key travels to the next one', attrs: { 'aria-label': 'Easing of the selected key' } },
     h('option', { value: 'smooth' }, 'Smooth'),
     h('option', { value: 'linear' }, 'Linear'),
     h('option', { value: 'hold' }, 'Hold'),
@@ -52,12 +69,15 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   ease.addEventListener('change', () => {
     if (selected) editor.setKeyEase(selected.key, ease.value as NonNullable<Keyframe['ease']>)
   })
-  const removeKey = button('Delete key', () => deleteSelected(), { title: 'Delete the selected key (Delete)' })
+  const removeKey = button('Delete the selected key', () => deleteSelected(), { icon: icons.trash, title: 'Delete the selected key (Delete)' })
 
   const bar = h('div', { class: 'tl-bar' },
     toStart,
     play,
-    h('label', { class: 'tl-time', title: 'Playhead, in seconds' }, time, h('span', {}, '/'), duration, h('span', {}, 's')),
+    h('label', { class: 'tl-field tl-now' }, timeCaption, time),
+    h('label', { class: 'tl-field tl-length' }, h('span', {}, 'Length'), duration),
+    units,
+    h('label', { class: 'tl-field tl-fps' }, fps, h('span', {}, 'fps')),
     h('label', { class: 'check' }, loop, 'Loop'),
     h('span', { class: 'sep' }),
     autoKey,
@@ -65,7 +85,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     keyCamera,
     h('label', { class: 'check', title: 'Look through the animated camera. Off leaves the viewport free and draws the camera’s path.' }, follow, 'Through camera'),
     h('span', { class: 'spacer' }),
-    h('label', { class: 'tl-key', title: 'The selected key' }, h('span', {}, 'Key'), ease),
+    ease,
     removeKey,
   )
 
@@ -84,6 +104,9 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     return rect.width > 0 ? ((clientX - rect.left) / rect.width) * editor.animation.duration : 0
   }
 
+  /** Counted in frames, the playhead lands on frames */
+  const scrubTime = (lane: HTMLElement, clientX: number) => (inFrames() ? snap(timeAt(lane, clientX)) : timeAt(lane, clientX))
+
   /** Dragging along a lane's background moves the playhead. */
   function bindScrub(lane: HTMLElement) {
     let pointerId: number | null = null
@@ -96,10 +119,10 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
         // not an active pointer
       }
       editor.pause()
-      editor.setTime(timeAt(lane, e.clientX))
+      editor.setTime(scrubTime(lane, e.clientX))
     })
     lane.addEventListener('pointermove', (e) => {
-      if (e.pointerId === pointerId) editor.setTime(timeAt(lane, e.clientX))
+      if (e.pointerId === pointerId) editor.setTime(scrubTime(lane, e.clientX))
     })
     const end = (e: PointerEvent) => {
       if (e.pointerId === pointerId) pointerId = null
@@ -124,7 +147,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   }
 
   function keyMark(lane: HTMLElement, target: string, key: Keyframe) {
-    const mark = h('button', { type: 'button', class: 'tl-key-mark', title: `${trim(key.t, 2)} s` })
+    const mark = h('button', { type: 'button', class: 'tl-key-mark', title: stamp(key.t) })
     mark.style.left = `${fraction(key.t) * 100}%`
     if (selected?.key === key) mark.classList.add('selected')
 
@@ -154,10 +177,10 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
         editor.beginKeyEdit()
       }
       const raw = timeAt(lane, e.clientX)
-      editor.moveKey(target, key, e.shiftKey ? raw : Math.round(raw / SNAP) * SNAP)
+      editor.moveKey(target, key, e.shiftKey ? raw : snap(raw))
       // moved by hand rather than by a redraw, which would drop the pointer mid-drag
       mark.style.left = `${fraction(key.t) * 100}%`
-      mark.title = `${trim(key.t, 2)} s`
+      mark.title = stamp(key.t)
     })
     const end = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return
@@ -179,11 +202,16 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     // a key that no longer exists (deleted, or replaced by an undo) cannot stay selected
     if (selected && !animation.tracks.some((track) => track.target === selected!.target && track.keys.includes(selected!.key))) selected = null
 
-    const step = niceStep(animation.duration)
+    // the ruler counts what the fields count: seconds, or frames
+    const scale = inFrames() ? editor.fps : 1
+    const length = animation.duration * scale
+    const step = niceStep(length, inFrames() ? FRAME_STEPS : SECOND_STEPS)
     const ticks: HTMLElement[] = []
-    for (let t = 0; t <= animation.duration + 1e-6; t += step) {
-      const tick = h('span', { class: 'tl-tick' }, trim(t, 1))
-      tick.style.left = `${fraction(t) * 100}%`
+    for (let at = 0; at <= length + 1e-6; at += step) {
+      const tick = h('span', { class: 'tl-tick' }, trim(at, 1))
+      tick.style.left = `${fraction(at / scale) * 100}%`
+      // a tick at the very end has no room to its right
+      if (at >= length - step * 0.04) tick.classList.add('tl-tick-end')
       ticks.push(tick)
     }
     rulerLane.replaceChildren(...ticks)
@@ -221,12 +249,19 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
     if (animation.tracks.length > trackCount && trackCount > 0) rows.lastElementChild?.scrollIntoView({ block: 'nearest' })
     trackCount = animation.tracks.length
 
-    setValue(duration, trim(animation.duration, 2))
+    const frames = inFrames()
+    setValue(duration, frames ? String(Math.max(Math.round(animation.duration * editor.fps), 1)) : trim(animation.duration, 2))
+    setValue(fps, trim(editor.fps, 3))
+    if (document.activeElement !== units) units.value = editor.timeUnits
+    timeCaption.textContent = frames ? 'Frame' : 'Time'
+    time.step = frames ? '1' : String(SNAP)
+    time.title = frames ? 'The frame the playhead is on' : 'Playhead, in seconds'
+    duration.title = frames ? `Length of the animation, in frames (${trim(animation.duration, 2)} s at ${trim(editor.fps, 3)} fps)` : 'Length of the animation, in seconds'
     loop.checked = animation.loop !== false
     autoKey.setAttribute('aria-pressed', String(editor.autoKey))
     follow.checked = editor.followCamera
     const hasDoc = !!editor.doc
-    for (const control of [play, toStart, time, duration, loop, autoKey, keyObject, keyCamera, follow]) control.disabled = !hasDoc
+    for (const control of [play, toStart, time, duration, units, fps, loop, autoKey, keyObject, keyCamera, follow]) control.disabled = !hasDoc
     syncSelection()
     syncTime()
   }
@@ -239,7 +274,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   /** The playhead moved: cheap, and called every frame during playback. */
   function syncTime() {
     playhead.style.setProperty('--at', String(fraction(editor.time)))
-    setValue(time, editor.time.toFixed(2))
+    setValue(time, inFrames() ? String(toUnits(editor.time)) : editor.time.toFixed(2))
     const playing = editor.playing
     if (play.dataset.playing !== String(playing)) {
       play.dataset.playing = String(playing)

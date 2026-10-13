@@ -515,15 +515,33 @@ pre {
 body.timeline-closed .timeline { height: auto; }
 body.timeline-closed .tl-body { display: none; }
 
-.tl-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+.tl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .tl-bar .sep { width: 1px; height: 20px; margin: 0 4px; }
 .tl-bar button:has(> svg:only-child) { width: 30px; padding: 0; }
 .tl-bar button.record .icon { color: var(--muted); }
 .tl-bar button.record[aria-pressed="true"] { border-color: var(--danger); color: var(--danger); }
 .tl-bar button.record[aria-pressed="true"] .icon { color: var(--danger); }
-.tl-time, .tl-key { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
-.tl-time input { width: 62px; }
-.tl-key select:disabled, .tl-bar button:disabled { opacity: 0.4; }
+/* a caption and its number in one box, as Blender's fields are, so they read as something to type into */
+.tl-field {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: text;
+}
+.tl-field:hover { border-color: var(--hover); }
+.tl-field:focus-within { border-color: var(--accent); }
+.tl-field input[type="number"] { height: 24px; padding: 0; border: 0; background: none; color: var(--text); text-align: right; outline: none; }
+.tl-now input { width: 44px; }
+.tl-length input { width: 44px; }
+.tl-fps { gap: 5px; }
+.tl-fps input { width: 30px; }
+.tl-bar > select { height: 28px; }
+.tl-bar select:disabled, .tl-bar button:disabled { opacity: 0.4; }
 
 .tl-body { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--hover) transparent; }
 .tl-row { display: grid; grid-template-columns: var(--tl-label) minmax(0, 1fr); align-items: stretch; min-height: 24px; border-bottom: 1px solid var(--line); }
@@ -539,7 +557,7 @@ body.timeline-closed .tl-body { display: none; }
 .tl-ruler { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .tl-tick { position: absolute; top: 0; bottom: 0; padding-left: 4px; border-left: 1px solid var(--line); line-height: 22px; pointer-events: none; }
 /* the tick at the very end has no room to its right, so its number sits to the left of the line */
-.tl-tick:last-child { padding: 0 4px 0 0; border-left: 0; border-right: 1px solid var(--line); transform: translateX(-100%); }
+.tl-tick-end { padding: 0 4px 0 0; border-left: 0; border-right: 1px solid var(--line); transform: translateX(-100%); }
 .tl-key-mark {
   position: absolute;
   top: 50%;

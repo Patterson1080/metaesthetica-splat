@@ -105,6 +105,8 @@ Forces rest in the editor while a selection tool is in use, because selection wo
 
 The dock under the viewport works the way Blender's does: a playhead, one row per animated property, and keyframes you can drag.
 
+**Length and units.** The fields at the left of the dock set the timeline up. *Length* is how long the animation runs; type a new value and press Enter. The dropdown beside it switches the whole dock between **Seconds** and **Frames**: the playhead field, the length, the ruler and the key tooltips all follow, and in frames the playhead and dragged keys land on whole frames. *fps* is the frame rate, 24 unless you change it, and it is also the frame rate of a rendered video. Key times are stored in seconds, so changing the frame rate changes how many frames there are, not how long anything takes.
+
 What can be keyed:
 
 | | Properties |
@@ -133,7 +135,7 @@ The animation is saved in the scene file and the player plays it. A force's trav
 
 ### Rendering a video
 
-**Export → Video → Render video (.mp4)** renders the whole timeline, start to end, to an H.264 `.mp4`. Choose a size (720p up to 4K, square or vertical), a frame rate (24, 30 or 60) and a quality.
+**Export → Video → Render video (.mp4)** renders the whole timeline, start to end, to an H.264 `.mp4`. Choose a size (720p up to 4K, square or vertical), a frame rate and a quality. The frame rate is the timeline's own: changing it in either place changes it in both.
 
 It is a true offline render, not a screen recording: the timeline is stepped one frame at a time at exactly the chosen rate, each frame waits for its depth sort before it is taken, and the canvas is rendered at the chosen size whatever the size of your window. The picture is the animated camera's view; if the camera has no keys, it is wherever the viewport camera is. The grid, gizmos, box outlines and selection highlight are left out. Forces run on the same stepped clock, so the flow is smooth at any frame rate.
 
@@ -271,7 +273,7 @@ Methods: `load()`, `setPose(index | pose)`, `reset()`, `getPose()`, `setSections
     }
   ],
   "animation": {
-    "duration": 12, "loop": true, "autoplay": true,
+    "duration": 12, "fps": 24, "loop": true, "autoplay": true,
     "tracks": [
       { "target": "camera.position", "keys": [{ "t": 0, "v": [3.2, 1.4, 3.2] }, { "t": 6, "v": [-3.4, 2.2, 2.4] }] },
       { "target": "force.0.strength", "keys": [{ "t": 0, "v": 5 }, { "t": 6, "v": 70, "ease": "linear" }, { "t": 12, "v": 5 }] }
