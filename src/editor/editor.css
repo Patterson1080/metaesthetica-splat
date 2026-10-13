@@ -543,7 +543,7 @@ body.timeline-closed .tl-body { display: none; }
 .tl-bar > select { height: 28px; }
 .tl-bar select:disabled, .tl-bar button:disabled { opacity: 0.4; }
 
-.tl-body { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--hover) transparent; }
+.tl-body { position: relative; user-select: none; -webkit-user-select: none; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--hover) transparent; }
 .tl-row { display: grid; grid-template-columns: var(--tl-label) minmax(0, 1fr); align-items: stretch; min-height: 24px; border-bottom: 1px solid var(--line); }
 .tl-head { position: sticky; top: 0; z-index: 2; background: var(--panel); min-height: 22px; }
 .tl-label { display: flex; align-items: center; gap: 2px; padding: 0 4px 0 10px; min-width: 0; border-right: 1px solid var(--line); font-size: 12px; }
@@ -553,8 +553,9 @@ body.timeline-closed .tl-body { display: none; }
 .tl-label button svg { width: 13px; height: 13px; }
 
 /* a lane is inset so keys at the very start and end are not cut off; the playhead uses the same inset */
-.tl-lane { position: relative; margin: 0 var(--tl-pad); cursor: ew-resize; touch-action: none; }
-.tl-ruler { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.tl-lane { position: relative; margin: 0 var(--tl-pad); touch-action: none; }
+/* the ruler scrubs; the tracks under it are for selecting keys */
+.tl-ruler { cursor: ew-resize; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .tl-tick { position: absolute; top: 0; bottom: 0; padding-left: 4px; border-left: 1px solid var(--line); line-height: 22px; pointer-events: none; }
 /* the tick at the very end has no room to its right, so its number sits to the left of the line */
 .tl-tick-end { padding: 0 4px 0 0; border-left: 0; border-right: 1px solid var(--line); transform: translateX(-100%); }
@@ -574,6 +575,14 @@ body.timeline-closed .tl-body { display: none; }
 }
 .tl-key-mark:hover:not(:disabled) { background: #fff; }
 .tl-key-mark.selected, .tl-key-mark.selected:hover { background: var(--accent); }
+/* the box drawn while dragging across the tracks to select keys */
+.tl-marquee {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  pointer-events: none;
+}
 .tl-playhead {
   position: absolute;
   top: 0;

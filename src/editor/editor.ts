@@ -1230,31 +1230,41 @@ export class Editor {
     this.beginSceneEdit()
   }
 
-  moveKey(target: string, key: Keyframe, t: number) {
-    const track = this.animation.tracks.find((candidate) => candidate.target === target)
-    if (!track) return
-    key.t = Math.min(Math.max(round(t, 4), 0), this.animation.duration)
-    track.keys.sort((a, b) => a.t - b.t)
+  /** Put keys at new times, all at once: a drag of one key or of a whole selection. */
+  moveKeys(moves: { target: string; key: Keyframe; t: number }[]) {
+    const touched = new Set<string>()
+    for (const { target, key, t } of moves) {
+      key.t = Math.min(Math.max(round(t, 4), 0), this.animation.duration)
+      touched.add(target)
+    }
+    for (const track of this.animation.tracks) if (touched.has(track.target)) track.keys.sort((a, b) => a.t - b.t)
     this.applyTime()
   }
 
-  endKeyEdit() {
-    this.endSceneEdit('Move key')
+  endKeyEdit(label = 'Move key') {
+    this.endSceneEdit(label)
   }
 
   removeKey(target: string, key: Keyframe) {
-    this.editScene('Delete key', () => {
-      const track = this.animation.tracks.find((candidate) => candidate.target === target)
-      if (!track) return
-      track.keys = track.keys.filter((candidate) => candidate !== key)
-      if (track.keys.length === 0) this.animation.tracks = this.animation.tracks.filter((candidate) => candidate !== track)
+    this.removeKeys([{ target, key }])
+  }
+
+  /** Delete keys as one undo step. A track left with no keys goes with them. */
+  removeKeys(keys: { target: string; key: Keyframe }[]) {
+    if (keys.length === 0) return
+    const gone = new Set(keys.map(({ key }) => key))
+    this.editScene(keys.length === 1 ? 'Delete key' : `Delete ${keys.length} keys`, () => {
+      for (const track of this.animation.tracks) track.keys = track.keys.filter((key) => !gone.has(key))
+      this.animation.tracks = this.animation.tracks.filter((track) => track.keys.length > 0)
     })
   }
 
-  setKeyEase(key: Keyframe, ease: NonNullable<Keyframe['ease']>) {
+  setKeysEase(keys: Keyframe[], ease: NonNullable<Keyframe['ease']>) {
     this.editScene('Change key easing', () => {
-      if (ease === 'smooth') delete key.ease
-      else key.ease = ease
+      for (const key of keys) {
+        if (ease === 'smooth') delete key.ease
+        else key.ease = ease
+      }
     })
   }
 

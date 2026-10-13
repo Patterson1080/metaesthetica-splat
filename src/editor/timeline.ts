@@ -17,7 +17,14 @@ const niceStep = (length: number, steps: number[]) => steps.find((step) => step 
  * and calls the editor to change it.
  */
 export function buildTimeline(root: HTMLElement, editor: Editor) {
-  let selected: { target: string; key: Keyframe } | null = null
+  /** The selected keys, each with the track it is on */
+  const selection = new Map<Keyframe, string>()
+  /** The diamond drawn for each key, so a drag can move several by hand */
+  let marks = new Map<Keyframe, HTMLElement>()
+  /** The pointer is over the dock: Ctrl+A then means its keys, not the splats */
+  let hovered = false
+  root.addEventListener('pointerenter', () => (hovered = true))
+  root.addEventListener('pointerleave', () => (hovered = false))
 
   // ── transport and keying ─────────────────────────────────────────────────
 
@@ -61,15 +68,17 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   const follow = h('input', { type: 'checkbox' })
   follow.addEventListener('change', () => editor.setFollowCamera(follow.checked))
 
-  const ease = h('select', { title: 'How the selected key travels to the next one', attrs: { 'aria-label': 'Easing of the selected key' } },
+  const ease = h('select', { title: 'How the selected keys travel to the next one', attrs: { 'aria-label': 'Easing of the selected keys' } },
     h('option', { value: 'smooth' }, 'Smooth'),
     h('option', { value: 'linear' }, 'Linear'),
     h('option', { value: 'hold' }, 'Hold'),
+    // shown, never chosen: the selected keys do not all travel the same way
+    h('option', { value: 'mixed', hidden: true }, 'Mixed'),
   )
   ease.addEventListener('change', () => {
-    if (selected) editor.setKeyEase(selected.key, ease.value as NonNullable<Keyframe['ease']>)
+    if (selection.size && ease.value !== 'mixed') editor.setKeysEase([...selection.keys()], ease.value as NonNullable<Keyframe['ease']>)
   })
-  const removeKey = button('Delete the selected key', () => deleteSelected(), { icon: icons.trash, title: 'Delete the selected key (Delete)' })
+  const removeKey = button('Delete the selected keys', () => deleteSelected(), { icon: icons.trash, title: 'Delete the selected keys (Delete)' })
 
   const bar = h('div', { class: 'tl-bar' },
     toStart,
@@ -107,7 +116,7 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   /** Counted in frames, the playhead lands on frames */
   const scrubTime = (lane: HTMLElement, clientX: number) => (inFrames() ? snap(timeAt(lane, clientX)) : timeAt(lane, clientX))
 
-  /** Dragging along a lane's background moves the playhead. */
+  /** Dragging along the ruler moves the playhead. */
   function bindScrub(lane: HTMLElement) {
     let pointerId: number | null = null
     lane.addEventListener('pointerdown', (e) => {
@@ -132,67 +141,164 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   }
   bindScrub(rulerLane)
 
-  function select(next: typeof selected) {
-    selected = next
-    for (const node of rows.querySelectorAll<HTMLElement>('.tl-key-mark')) node.classList.remove('selected')
+  /** Color the diamonds by what is selected, and bring the key controls in line. */
+  function paint() {
+    for (const [key, node] of marks) node.classList.toggle('selected', selection.has(key))
     syncSelection()
   }
 
+  function setSelection(keys: Iterable<[Keyframe, string]>) {
+    selection.clear()
+    for (const [key, target] of keys) selection.set(key, target)
+    paint()
+  }
+
   function deleteSelected(): boolean {
-    if (!selected) return false
-    const { target, key } = selected
-    selected = null
-    editor.removeKey(target, key)
+    if (selection.size === 0) return false
+    const keys = [...selection].map(([key, target]) => ({ target, key }))
+    selection.clear()
+    editor.removeKeys(keys)
     return true
   }
 
   function keyMark(lane: HTMLElement, target: string, key: Keyframe) {
     const mark = h('button', { type: 'button', class: 'tl-key-mark', title: stamp(key.t) })
     mark.style.left = `${fraction(key.t) * 100}%`
-    if (selected?.key === key) mark.classList.add('selected')
+    if (selection.has(key)) mark.classList.add('selected')
+    marks.set(key, mark)
 
     let pointerId: number | null = null
     let startX = 0
     let dragging = false
+    /** Shift or Ctrl was held: the press changed the selection and is not a jump to the key */
+    let toggled = false
+    /** Where the selected keys were when the drag began, and how far the pointer was from this one */
+    let origin = new Map<Keyframe, number>()
+    let grip = 0
     mark.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return
       e.stopPropagation()
-      pointerId = e.pointerId
       startX = e.clientX
       dragging = false
+      toggled = e.shiftKey || e.ctrlKey || e.metaKey
+      if (toggled) {
+        // add this key to the selection, or take it out
+        if (selection.has(key)) selection.delete(key)
+        else selection.set(key, target)
+        paint()
+        // a key just deselected is not about to be dragged
+        if (!selection.has(key)) return
+      } else if (!selection.has(key)) {
+        setSelection([[key, target]])
+      }
+      // pressing a key that is already selected keeps the others, so the group can be dragged by it
+      pointerId = e.pointerId
       try {
         mark.setPointerCapture(e.pointerId)
       } catch {
         // not an active pointer
       }
-      select({ target, key })
-      mark.classList.add('selected')
     })
     mark.addEventListener('pointermove', (e) => {
       if (e.pointerId !== pointerId) return
       if (!dragging) {
         if (Math.abs(e.clientX - startX) < DRAG_SLOP) return
         dragging = true
+        origin = new Map([...selection.keys()].map((selected) => [selected, selected.t]))
+        grip = timeAt(lane, startX) - key.t
         editor.pause()
         editor.beginKeyEdit()
       }
-      const raw = timeAt(lane, e.clientX)
-      editor.moveKey(target, key, e.shiftKey ? raw : snap(raw))
+      // this key follows the pointer; the rest of the selection keeps its distance from it
+      const from = origin.get(key) ?? key.t
+      const to = timeAt(lane, e.clientX) - grip
+      const times = [...origin.values()]
+      const shift = Math.min(Math.max((e.shiftKey ? to : snap(to)) - from, -Math.min(...times)), editor.animation.duration - Math.max(...times))
+      editor.moveKeys([...origin].map(([moved, t]) => ({ target: selection.get(moved) ?? target, key: moved, t: t + shift })))
       // moved by hand rather than by a redraw, which would drop the pointer mid-drag
-      mark.style.left = `${fraction(key.t) * 100}%`
-      mark.title = stamp(key.t)
+      for (const moved of origin.keys()) {
+        const node = marks.get(moved)
+        if (!node) continue
+        node.style.left = `${fraction(moved.t) * 100}%`
+        node.title = stamp(moved.t)
+      }
     })
     const end = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return
       pointerId = null
-      if (dragging) editor.endKeyEdit()
-      // a plain click on a key jumps the playhead to it
-      else editor.setTime(key.t)
+      if (dragging) return editor.endKeyEdit(origin.size > 1 ? `Move ${origin.size} keys` : 'Move key')
+      if (toggled) return
+      // a plain click on a key leaves it the only one selected and jumps the playhead to it
+      setSelection([[key, target]])
+      editor.setTime(key.t)
     }
     mark.addEventListener('pointerup', end)
     mark.addEventListener('pointercancel', end)
     return mark
   }
+
+  // ── box select: drag across the rows, as in Blender's dope sheet ──
+
+  const marquee = h('div', { class: 'tl-marquee', hidden: true })
+  body.append(marquee)
+  let box: { pointerId: number; x: number; y: number; dragging: boolean; base: Map<Keyframe, string>; mode: 'set' | 'add' | 'remove' } | null = null
+  body.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !editor.doc) return
+    // only on empty track, or the empty space under the rows: the ruler scrubs, the labels have buttons
+    const on = e.target as HTMLElement
+    const lane = on.classList.contains('tl-lane') && !on.classList.contains('tl-ruler')
+    if (!lane && on !== rows && on !== body) return
+    box = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, dragging: false, base: new Map(selection), mode: e.shiftKey ? 'add' : e.ctrlKey || e.metaKey ? 'remove' : 'set' }
+    try {
+      body.setPointerCapture(e.pointerId)
+    } catch {
+      // not an active pointer
+    }
+    // or the drag would select the track names as text
+    e.preventDefault()
+  })
+  body.addEventListener('pointermove', (e) => {
+    if (!box || e.pointerId !== box.pointerId) return
+    if (!box.dragging) {
+      if (Math.hypot(e.clientX - box.x, e.clientY - box.y) < DRAG_SLOP) return
+      box.dragging = true
+      marquee.hidden = false
+    }
+    const left = Math.min(box.x, e.clientX)
+    const right = Math.max(box.x, e.clientX)
+    const top = Math.min(box.y, e.clientY)
+    const bottom = Math.max(box.y, e.clientY)
+    // the box lives inside the scrolling body, so it is placed in the body's own coordinates
+    const frame = body.getBoundingClientRect()
+    marquee.style.left = `${left - frame.left + body.scrollLeft}px`
+    marquee.style.top = `${top - frame.top + body.scrollTop}px`
+    marquee.style.width = `${right - left}px`
+    marquee.style.height = `${bottom - top}px`
+
+    // Shift adds what the box covers to what was selected, Ctrl takes it away, neither replaces it
+    const next = new Map(box.mode === 'set' ? [] : box.base)
+    for (const track of editor.animation.tracks) {
+      for (const key of track.keys) {
+        const rect = marks.get(key)?.getBoundingClientRect()
+        if (!rect) continue
+        const cx = rect.left + rect.width / 2
+        const cy = rect.top + rect.height / 2
+        if (cx < left || cx > right || cy < top || cy > bottom) continue
+        if (box.mode === 'remove') next.delete(key)
+        else next.set(key, track.target)
+      }
+    }
+    setSelection(next)
+  })
+  const endBox = (e: PointerEvent) => {
+    if (!box || e.pointerId !== box.pointerId) return
+    // a click on empty track that never became a drag deselects, unless it was adding or removing
+    if (!box.dragging && box.mode === 'set' && e.type === 'pointerup') setSelection([])
+    box = null
+    marquee.hidden = true
+  }
+  body.addEventListener('pointerup', endBox)
+  body.addEventListener('pointercancel', endBox)
 
   let trackCount = 0
 
@@ -200,7 +306,9 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   function render() {
     const { animation } = editor
     // a key that no longer exists (deleted, or replaced by an undo) cannot stay selected
-    if (selected && !animation.tracks.some((track) => track.target === selected!.target && track.keys.includes(selected!.key))) selected = null
+    const alive = new Set(animation.tracks.flatMap((track) => track.keys))
+    for (const key of [...selection.keys()]) if (!alive.has(key)) selection.delete(key)
+    marks = new Map()
 
     // the ruler counts what the fields count: seconds, or frames
     const scale = inFrames() ? editor.fps : 1
@@ -227,7 +335,6 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
       rows.replaceChildren(
         ...animation.tracks.map((track) => {
           const lane = h('div', { class: 'tl-lane' })
-          bindScrub(lane)
           // double-click on empty lane: a key there, with the value the track has at that time
           lane.addEventListener('dblclick', (e) => {
             if (e.target !== lane) return
@@ -267,8 +374,12 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   }
 
   function syncSelection() {
-    ease.disabled = removeKey.disabled = !selected
-    if (selected && document.activeElement !== ease) ease.value = selected.key.ease ?? 'smooth'
+    const count = selection.size
+    ease.disabled = removeKey.disabled = count === 0
+    removeKey.title = count > 1 ? `Delete the ${count} selected keys (Delete)` : 'Delete the selected key (Delete)'
+    if (count === 0 || document.activeElement === ease) return
+    const eases = new Set([...selection.keys()].map((key) => key.ease ?? 'smooth'))
+    ease.value = eases.size === 1 ? [...eases][0] : 'mixed'
   }
 
   /** The playhead moved: cheap, and called every frame during playback. */
@@ -287,5 +398,23 @@ export function buildTimeline(root: HTMLElement, editor: Editor) {
   editor.events.on('time', syncTime)
   render()
 
-  return { deleteSelected }
+  return {
+    deleteSelected,
+    /** Select every key. Returns false when there are none. */
+    selectAll(): boolean {
+      const all = editor.animation.tracks.flatMap((track) => track.keys.map((key) => [key, track.target] as [Keyframe, string]))
+      if (all.length === 0) return false
+      setSelection(all)
+      return true
+    },
+    /** Deselect the keys. Returns false when none were selected. */
+    clearSelection(): boolean {
+      if (selection.size === 0) return false
+      setSelection([])
+      return true
+    },
+    get hovered() {
+      return hovered
+    },
+  }
 }

@@ -685,7 +685,8 @@ export function bindUi(shell: Shell, editor: Editor) {
     if (mod) {
       if (key === 'z') e.shiftKey ? editor.history.redo() : editor.history.undo()
       else if (key === 'y') editor.history.redo()
-      else if (key === 'a') editor.selectAll()
+      // with the pointer over the timeline, "all" is its keys
+      else if (key === 'a') (timeline.hovered && timeline.selectAll()) || editor.selectAll()
       else if (key === 'i') editor.invertSelection()
       else if (key === 'o') browse()
       else return
@@ -729,7 +730,9 @@ export function bindUi(shell: Shell, editor: Editor) {
       else if (editor.tool === 'annotate' && editor.activeAnnotation !== null) editor.removeAnnotation(editor.activeAnnotation)
     } else if (key === 'escape') {
       // each press backs out of one thing: the selection, then the object being edited, then the tool
-      if (editor.doc?.state.selected) editor.selectNone()
+      if (timeline.clearSelection()) {
+        // handled: the selected keys go first
+      } else if (editor.doc?.state.selected) editor.selectNone()
       else if (editor.active) editor.setActive(null)
       else if (editor.activeAnnotation !== null) editor.setActiveAnnotation(null)
       else editor.setTool('navigate')

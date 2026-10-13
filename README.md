@@ -125,7 +125,13 @@ Setting keys:
 - **Auto-key** is Blender's record button. While it is on, any animatable property you change, by gizmo or by number, is keyed at the playhead, and only the properties that changed.
 - Each row has its own add-key button; double-clicking an empty stretch of a row adds a key there.
 
-Working with keys: drag a key to move it in time (it snaps to 0.05 s; hold Shift to place it freely), click one to select it and jump the playhead to it, then choose how it travels to the next key (**Smooth**, **Linear** or **Hold**) or press Delete. Drag the ruler to scrub. Everything on the timeline is undoable.
+Working with keys:
+
+- **Select.** Click a key to select it and jump the playhead to it. **Drag across the tracks** to box-select every key the box covers, on as many tracks as it crosses. `Shift`-click adds a key to the selection or takes it out; a box drawn with `Shift` adds, with `Ctrl` removes. `Ctrl+A` with the pointer over the timeline selects every key. Click empty track, or press `Esc`, to deselect.
+- **Move.** Drag any selected key and the whole selection moves with it, keeping its spacing. Keys snap to 0.05 s, or to whole frames when the timeline counts in frames; hold `Shift` while dragging to place them freely.
+- **Change.** The dropdown at the right of the bar sets how the selected keys travel to the next one (**Smooth**, **Linear** or **Hold**), and Delete removes them.
+
+Drag the **ruler** to scrub; the tracks under it are for selecting. Everything on the timeline is undoable, and moving or deleting a selection is one undo step.
 
 As in Blender, an animated property shows its value at the playhead. If you change one without keying it, the change lasts until the playhead moves; the status bar says so when it happens.
 
@@ -167,6 +173,7 @@ Things to know:
 | Numpad `4` `6` `8` `2` · `+` `−` · `.` | orbit 15° (with `Ctrl`: pan) · zoom · frame |
 | `Space` | play / pause the timeline |
 | `K` · `Shift+K` | key what is being edited · key the camera |
+| `Ctrl+A` over the timeline | select every key |
 | `Home` | playhead to the start |
 | `T` | fold the timeline away |
 
