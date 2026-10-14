@@ -1,7 +1,7 @@
 import { annotationCss } from '../core/annotations'
 import { parseScene, type SplatScene, type Vec3Tuple } from '../core/scene'
 import { SplatPlayer } from '../player/index'
-import { button, field, group, h, icons, number, setValue, trim, vec3Row } from './dom'
+import { button, field, group, h, icons, number, recall, remember, setValue, trim, vec3Row } from './dom'
 import type { Editor, Tool, Transform } from './editor'
 import { createKeyToggles } from './key-toggle'
 import { download } from './ply-export'
@@ -357,7 +357,41 @@ export function bindUi(shell: Shell, editor: Editor) {
     option('1080x1080', '1080 × 1080 (square)'),
     option('1080x1920', '1080 × 1920 (vertical)'),
   )
-  videoSize.value = '1920x1080'
+  videoSize.value = recall('videoSize', '1920x1080')
+  if (!videoSize.value) videoSize.value = '1920x1080'
+  const applyVideoSize = () => {
+    const [width, height] = videoSize.value.split('x').map(Number)
+    editor.setOutput(width, height)
+  }
+  videoSize.addEventListener('change', () => {
+    remember('videoSize', videoSize.value)
+    applyVideoSize()
+  })
+  // the frame of that video, marked in the viewport: what is inside it is what gets rendered
+  const frameToggle = h('input', { type: 'checkbox', checked: recall('showFrame', true) })
+  frameToggle.addEventListener('change', () => {
+    remember('showFrame', frameToggle.checked)
+    editor.setShowFrame(frameToggle.checked)
+  })
+  editor.showFrame = frameToggle.checked
+  applyVideoSize()
+  const frameCaption = h('span', {})
+  const outputFrame = h('div', { class: 'output-frame', hidden: true }, frameCaption)
+  shell.viewport.append(outputFrame)
+  function syncFrame() {
+    const rect = editor.doc ? viewer.frameRect() : null
+    outputFrame.hidden = !rect
+    if (!rect) return
+    outputFrame.style.left = `${rect.x}px`
+    outputFrame.style.top = `${rect.y}px`
+    outputFrame.style.width = `${rect.width}px`
+    outputFrame.style.height = `${rect.height}px`
+    // through the camera the surround is dimmed, as Blender's passepartout is; outside it, only outlined
+    outputFrame.classList.toggle('through', editor.nav.throughCamera)
+    const caption = `${editor.output.width} × ${editor.output.height}`
+    if (frameCaption.textContent !== caption) frameCaption.textContent = caption
+  }
+  new ResizeObserver(syncFrame).observe(shell.viewport)
   // one frame rate for the timeline and for the video rendered from it
   const videoFps = h('select', { title: 'Frames per second. This is the timeline’s frame rate: changing it here changes it there.' })
   videoFps.addEventListener('change', () => editor.setFps(Number(videoFps.value)))
@@ -436,6 +470,7 @@ export function bindUi(shell: Shell, editor: Editor) {
     field('Frame rate', videoFps),
     field('Quality', videoQuality),
     h('label', { class: 'check', title: 'Draw the scene’s labels into the video: pinned labels, and the outlines, names and descriptions of labelled boxes' }, videoLabels, 'Include labels'),
+    h('label', { class: 'check', title: 'Outline the video’s frame in the viewport. What is inside it is exactly what gets rendered; the rest of the viewport is cropped away.' }, frameToggle, 'Show the frame in the viewport'),
     h('div', { class: 'column' }, renderButton),
   )
 
@@ -623,6 +658,8 @@ export function bindUi(shell: Shell, editor: Editor) {
   editor.events.on('tool', syncTool)
   editor.events.on('history', syncHistory)
   editor.events.on('view', syncView)
+  editor.events.on('view', syncFrame)
+  editor.events.on('doc', syncFrame)
   editor.events.on('animation', syncVideoFps)
   syncVideoFps()
   for (const event of ['doc', 'animation', 'scene', 'transform', 'settings'] as const) editor.events.on(event, syncKeys)

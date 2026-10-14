@@ -230,6 +230,10 @@ export class Editor {
   followCamera = true
   /** A video is being rendered: the timeline is stepped by the renderer, not by the clock */
   rendering = false
+  /** The size of the video the scene is being composed for, in pixels */
+  output = { width: 1920, height: 1080 }
+  /** Mark that frame in the viewport, so what is inside it is what a render shows */
+  showFrame = true
 
   private readonly gizmos: Record<(typeof GIZMO_TOOLS)[number], TransformGizmo>
   private gizmoStart: Transform | null = null
@@ -387,6 +391,7 @@ export class Editor {
       if (scene) this.applyScene(scene)
 
       this.viewer.setFov(this.settings.fov)
+      this.applyFrame()
       this.viewer.setBackground(this.settings.background)
       if (this.settings.initial) this.viewer.controls.setPose(this.settings.initial)
       else this.viewer.frameScene()
@@ -803,6 +808,22 @@ export class Editor {
   goToPose(pose: CameraPose) {
     this.viewer.controls.setPose(pose, true)
     this.viewer.requestRender()
+  }
+
+  /** The size a video will be rendered at. The viewport frames the scene for that shape. */
+  setOutput(width: number, height: number) {
+    this.output = { width, height }
+    this.applyFrame()
+  }
+
+  setShowFrame(on: boolean) {
+    this.showFrame = on
+    this.applyFrame()
+  }
+
+  private applyFrame() {
+    this.viewer.setFrameAspect(this.showFrame && this.doc ? this.output.width / this.output.height : null)
+    this.events.emit('view')
   }
 
   /** Bring the splat into view without turning the camera, so an axis view stays one. */
@@ -1640,7 +1661,9 @@ export class Editor {
 
   /** A still of the current view with the editor's helpers hidden: the player's poster image. */
   capturePoster() {
-    return this.withCleanView(() => this.viewer.capture('image/webp', 0.9))
+    // the poster stands in for the player, which shows the whole canvas through the scene's own lens
+    this.viewer.setFrameAspect(null)
+    return this.withCleanView(() => this.viewer.capture('image/webp', 0.9)).finally(() => this.applyFrame())
   }
 
   /**
@@ -1741,7 +1764,8 @@ export class Editor {
     // the labels as the page styles them: its typeface and color, haloed in the stage color
     const computed = getComputedStyle(this.callouts.root)
     const style = { color: computed.color || '#fff', font: computed.fontFamily || 'sans-serif', halo: this.settings.background ?? '#000' }
-    const scale = height / Math.max(this.viewer.canvas.clientHeight, 1)
+    // against the frame marked in the viewport when there is one, since that is the picture
+    const scale = height / Math.max(this.viewer.frameRect()?.height ?? this.viewer.canvas.clientHeight, 1)
     return {
       canvas,
       draw: () => {

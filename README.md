@@ -159,7 +159,7 @@ It is a true offline render, not a screen recording: the timeline is stepped one
 Things to know:
 
 - **Labels are redrawn for the video.** On the page they are HTML over the canvas, which a video cannot hold, so the render draws the same labels into the picture: same typeface, layout and halo. They are sized against the viewport, so they take up the same share of the frame as they do on screen; a taller editor window therefore gives smaller labels in the video.
-- The output's shape is the size you choose, not your viewport's, so a vertical render frames the scene differently from what a wide window shows. The vertical field of view is what stays fixed.
+- **The frame in the viewport is the picture.** The video has the shape of the size you choose, not of your window, so the viewport outlines that frame and labels it with its size. What is inside the outline is exactly what gets rendered; in a window wider than the video, the strips to either side are cropped away. Looking through the camera, everything outside the frame is dimmed, as Blender's passepartout is. Where the video is wider than the window, the frame becomes a band across the middle and the viewport's lens widens so the whole frame is in view. *Show the frame in the viewport* in the Video group turns it off.
 - It needs a browser that can encode H.264 through WebCodecs: current Chrome or Edge. The button reports it if the browser cannot.
 - For forces, render with the editor on WebGPU (`?device=webgpu`), for the same depth-ordering reason as in the player.
 - There is no sound track.

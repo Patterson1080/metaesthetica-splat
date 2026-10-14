@@ -240,6 +240,26 @@ body:not(.has-doc) .view-gizmo, body:not(.has-doc) .view-name { display: none; }
 .vg-tools .vg-zoom { cursor: ns-resize; }
 .vg-tools .vg-pan { cursor: move; }
 
+/* the frame of the video being composed for: what is inside it is what a render shows */
+.output-frame {
+  position: absolute;
+  z-index: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+/* looking through the camera, everything the render leaves out is dimmed */
+.output-frame.through { box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55); border-color: rgba(255, 255, 255, 0.75); }
+.output-frame span {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px #000;
+}
+
 /* the name of the view, in the opposite corner */
 .view-name {
   position: absolute;

@@ -83,6 +83,9 @@ export class SplatViewer {
   private pendingFrames = 0
   private framePending = false
   private offlineRatio: number | null = null
+  /** The lens as the scene has it; the camera's own may be wider, to fit a frame (see setFrameAspect) */
+  private lens = DEFAULT_FOV
+  private frameAspect: number | null = null
   private paused = false
   private destroyed = false
   private objectUrls = new Map<Asset, string>()
@@ -146,6 +149,7 @@ export class SplatViewer {
 
     this.resizeObserver = new ResizeObserver(() => {
       app.updateCanvasSize()
+      this.applyFov()
       if (this.framePending && canvas.clientWidth > 0 && canvas.clientHeight > 0) this.frameScene()
       this.requestRender()
     })
@@ -194,6 +198,8 @@ export class SplatViewer {
     // the size asked for is the size in pixels, whatever the display's density
     this.device.maxPixelRatio = 1
     this.app.setCanvasResolution(RESOLUTION_FIXED, width, height)
+    // the canvas now is the picture, so the lens is the scene's own
+    this.applyFov()
   }
 
   endOffline() {
@@ -201,6 +207,7 @@ export class SplatViewer {
     this.device.maxPixelRatio = this.offlineRatio
     this.offlineRatio = null
     this.app.setCanvasResolution(RESOLUTION_AUTO)
+    this.applyFov()
     this.resume()
   }
 
@@ -258,15 +265,54 @@ export class SplatViewer {
     this.requestRender()
   }
 
+  /** The vertical field of view of the picture, in degrees */
   setFov(fov: number) {
-    this.camera.camera!.fov = fov
-    // an orthographic view takes its size from the lens
-    if (this.controls.orthographic) this.controls.refresh()
-    this.requestRender()
+    this.lens = fov
+    this.applyFov()
   }
 
   get fov() {
-    return this.camera.camera!.fov
+    return this.lens
+  }
+
+  /**
+   * Compose for a picture of a given shape (width / height) rather than the canvas's own:
+   * a video frame, say. The field of view is vertical, so a picture narrower than the
+   * canvas is simply the middle of it, and `frameRect` says which part. One wider than the
+   * canvas would run off both sides, so the camera's lens is widened until it fits across,
+   * and the picture is then a band across the middle. Either way, what lies inside
+   * `frameRect` is exactly what a render of that shape will show. null turns it off.
+   */
+  setFrameAspect(aspect: number | null) {
+    this.frameAspect = aspect && aspect > 0 ? aspect : null
+    this.applyFov()
+  }
+
+  /** Where the picture being composed for sits in the canvas, in CSS pixels; null when it is the whole canvas. */
+  frameRect(): { x: number; y: number; width: number; height: number } | null {
+    const { clientWidth, clientHeight } = this.canvas
+    if (!this.frameAspect || clientWidth === 0 || clientHeight === 0) return null
+    const width = Math.min(clientWidth, clientHeight * this.frameAspect)
+    const height = width / this.frameAspect
+    return { x: (clientWidth - width) / 2, y: (clientHeight - height) / 2, width, height }
+  }
+
+  private applyFov() {
+    const camera = this.camera.camera
+    if (!camera) return
+    let fov = this.lens
+    const frame = this.offlineRatio === null ? this.frameRect() : null
+    // the frame is shorter than the canvas: the canvas has to see that much more, above and below
+    if (frame && frame.height < this.canvas.clientHeight - 0.5) {
+      const half = Math.tan((fov * Math.PI) / 360) * (this.canvas.clientHeight / frame.height)
+      fov = Math.min((Math.atan(half) * 360) / Math.PI, 170)
+    }
+    if (Math.abs(camera.fov - fov) > 1e-4) {
+      camera.fov = fov
+      // an orthographic view takes its size from the lens
+      if (this.controls.orthographic) this.controls.refresh()
+    }
+    this.requestRender()
   }
 
   /** Render now and return the canvas as an image blob (posters, thumbnails). */
